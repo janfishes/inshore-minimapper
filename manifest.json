@@ -1,7 +1,7 @@
 {
-  "name": "Mini Mapper",
-  "short_name": "Mini Mapper",
-  "description": "Every depth you have measured yourself, reduced to MLLW — Halifax River, Ponce Inlet and Mosquito Lagoon.",
+  "name": "Inshore Mini Mapper",
+  "short_name": "Inshore Mapper",
+  "description": "Every inshore depth you have measured yourself, reduced to MLLW — Halifax River, Ponce Inlet and Mosquito Lagoon.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

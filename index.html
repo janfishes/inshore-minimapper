@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Mini Mapper — depths you have actually seen</title>
-<meta name="description" content="Mini Mapper — a map of every depth you have measured yourself, reduced to MLLW, for the Halifax River, Ponce Inlet and Mosquito Lagoon.">
+<title>Inshore Mini Mapper — depths you have actually seen</title>
+<meta name="description" content="Inshore Mini Mapper — a map of every depth you have measured yourself, reduced to MLLW, for the inshore water: Halifax River, Ponce Inlet and Mosquito Lagoon.">
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#0E1F2E">
 <!-- Same one-switch decision as the tide board: standalone + apple-mobile-web-app-capable
@@ -12,7 +12,7 @@
      Open the site as an ordinary Safari tab from a bookmark when you want the URL. -->
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="Mini Mapper">
+<meta name="apple-mobile-web-app-title" content="Inshore Mapper">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 fill=%22%23295890%22/%3E%3Cline x1=%2216%22 y1=%220%22 x2=%2216%22 y2=%2221%22 stroke=%22%23FFFFFF%22 stroke-width=%221.6%22/%3E%3Cpath d=%22M12.6 21 h6.8 l-1.5 7 h-3.8 Z%22 fill=%22%23D15C22%22 stroke=%22%23FFFFFF%22 stroke-width=%221.2%22/%3E%3Cg stroke=%22%23FFFFFF%22 stroke-width=%221.4%22%3E%3Cline x1=%228%22 y1=%225%22 x2=%2213%22 y2=%225%22/%3E%3Cline x1=%228%22 y1=%2210%22 x2=%2213%22 y2=%2210%22/%3E%3Cline x1=%228%22 y1=%2215%22 x2=%2213%22 y2=%2215%22/%3E%3C/g%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -169,6 +169,9 @@
   input[type=file]{display:none}
   .passrow{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid var(--hair);
     font-family:var(--mono);font-size:11px;align-items:baseline}
+  /* divIcon paints a white box by default — the pin has to be the only
+     thing that shows. */
+  .here-pin{background:none;border:0;filter:drop-shadow(0 1px 2px rgba(14,31,46,.45))}
   .leaflet-popup-content{font-family:var(--mono);font-size:11px;line-height:1.6}
   .leaflet-popup-content b{font-size:13px}
   .leaflet-container{font-family:var(--mono)}
@@ -191,9 +194,9 @@
         <line x1="8" y1="5" x2="13" y2="5"/><line x1="8" y1="10" x2="13" y2="10"/><line x1="8" y1="15" x2="13" y2="15"/>
       </g>
     </svg>
-    <span>Mini <span class="thin">Mapper</span></span>
+    <span>Inshore <span class="thin">Mini Mapper</span></span>
   </h1>
-  <div class="sub" id="headSub">Every depth you have measured yourself, reduced to MLLW.</div>
+  <div class="sub" id="headSub">Every inshore depth you have measured yourself, reduced to MLLW.</div>
 </header>
 
 <div class="mapcard">
@@ -329,7 +332,7 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 /* =====================================================================
-   MINI MAPPER
+   INSHORE MINI MAPPER
    A map of the depths Jan has actually measured, reduced to MLLW so that
    readings taken on different tides are comparable with each other and
    with the NOAA survey.
@@ -540,7 +543,7 @@ async function fetchRange(begin, end){
   let lastErr = null;
   for(const st of STATIONS){
     const url = "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter"
-      + "?product=predictions&application=mini_mapper"
+      + "?product=predictions&application=inshore_mini_mapper"
       + "&begin_date=" + ymd(begin) + "&end_date=" + ymd(end)
       + "&datum=MLLW&station=" + st.id
       + "&time_zone=lst_ldt&units=english&interval=hilo&format=json";
@@ -851,7 +854,53 @@ const binFor = ft => BINS.find(b => ft < b.max) || BINS[BINS.length-1];
 /* =====================================================================
    MAP
    ===================================================================== */
-let map, ptLayer, surveyLayer, hereMarker, showPts = true, showSurvey = false;
+let map, ptLayer, surveyLayer, hereLayer, hereDot, hereRing, showPts = true, showSurvey = false;
+
+/* WHERE YOU ARE, drawn so it can never be mistaken for a sounding.
+
+   The soundings are orange dots. This is a TEAL dot with a heavy white
+   ring, on its own layer above them, and it carries the accuracy circle
+   with it — because "you are here" and "you are here, give or take 40 m"
+   are different facts and the second one is the one that decides whether
+   a reading taken now is worth keeping. The circle is a real radius in
+   metres, so it grows and shrinks with the zoom the way the doubt
+   actually does. */
+const HERE_TEAL = '#0A5A78';
+/* A PIN, not another dot. The soundings are round orange dots and there
+   are thousands of them; a round teal dot among them is one more dot. A
+   teardrop with a point reads as "this exact spot" at a glance and it is
+   the same shape WTF's Locate Me drops, so the two apps say "you are
+   here" the same way. The tip is the position — hence the 30 px anchor at
+   the bottom of a 30 px icon. */
+const PIN_SVG =
+  '<svg width="24" height="30" viewBox="0 0 24 30" xmlns="http://www.w3.org/2000/svg">'
+  + '<path d="M12 29.2C12 29.2 22.5 16.6 22.5 10.9 22.5 4.9 17.8.5 12 .5S1.5 4.9 1.5 10.9C1.5 16.6 12 29.2 12 29.2Z"'
+  + ' fill="' + HERE_TEAL + '" stroke="#ffffff" stroke-width="2.4" stroke-linejoin="round"/>'
+  + '<circle cx="12" cy="10.9" r="3.6" fill="#ffffff"/></svg>';
+
+function drawHere(){
+  if(!map || !fix) return;
+  if(!hereLayer) hereLayer = L.layerGroup().addTo(map);
+  const ll = [fix.lat, fix.lng];
+  if(!hereDot){
+    /* The accuracy circle is a real radius in metres, so it grows and
+       shrinks with the zoom the way the doubt actually does — "you are
+       here" and "you are here give or take 40 m" are different facts, and
+       the second decides whether a reading taken now is worth keeping. */
+    hereRing = L.circle(ll, { radius: fix.acc || 10, color:HERE_TEAL, weight:1,
+                              opacity:.7, fillColor:HERE_TEAL, fillOpacity:.12 }).addTo(hereLayer);
+    hereDot = L.marker(ll, {
+      icon: L.divIcon({ html:PIN_SVG, className:'here-pin', iconSize:[24,30], iconAnchor:[12,30] }),
+      /* Above the soundings always: a pin under a drift of 5,000 dots is a
+         pin you cannot see. */
+      zIndexOffset: 1000, keyboard:false
+    }).addTo(hereLayer);
+    hereDot.bindTooltip('You are here', {direction:'top', offset:[0,-28]});
+  } else {
+    hereDot.setLatLng(ll);
+    hereRing.setLatLng(ll).setRadius(fix.acc || 10);
+  }
+}
 
 /* USGS ImageryTopo: the same imagery WTF draws, so a spot looks the way it
    looks in the other app. NOTE the tile order — ArcGIS serves {z}/{y}/{x},
@@ -1059,7 +1108,7 @@ function startGps(){
       fix = { lat:pos.coords.latitude, lng:pos.coords.longitude, acc:pos.coords.accuracy, at:Date.now() };
       const bk = blockFor(fix.lat, fix.lng);
       if(bk && !depthBlocks.has(bk)) depthLoadBlock(bk).then(renderRead);
-      renderGps(); renderRead();
+      renderGps(); renderRead(); drawHere();
     },
     () => { renderGps(); },
     { enableHighAccuracy:true, maximumAge:2000, timeout:20000 });
@@ -1665,15 +1714,28 @@ document.getElementById('btnSurvey').addEventListener('click', async e => {
   if(showSurvey){ surveyLayer.addTo(map); e.target.textContent = 'Loading…'; await drawSurvey(); e.target.textContent = 'Survey lines'; }
   else map.removeLayer(surveyLayer);
 });
+/* FIND ME. Two jobs in one button: put the marker on the map, and take the
+   map to it. It asks for a fresh fix when there isn't one rather than
+   sitting there doing nothing — on a phone that has just woken up, "no fix
+   yet" and "broken button" look identical. */
 document.getElementById('btnHere').addEventListener('click', () => {
-  if(fix){ map.setView([fix.lat, fix.lng], 16); }
-  else if(navigator.geolocation){
-    navigator.geolocation.getCurrentPosition(p => {
+  const btn = document.getElementById('btnHere');
+  if(fix){ drawHere(); map.setView([fix.lat, fix.lng], 16); return; }
+  if(!navigator.geolocation){ btn.textContent = 'No GPS here'; return; }
+  btn.textContent = 'Finding…'; btn.disabled = true;
+  navigator.geolocation.getCurrentPosition(
+    p => {
       fix = { lat:p.coords.latitude, lng:p.coords.longitude, acc:p.coords.accuracy, at:Date.now() };
-      renderGps(); renderRead();
+      btn.textContent = 'Find me'; btn.disabled = false;
+      renderGps(); renderRead(); drawHere();
       map.setView([fix.lat, fix.lng], 16);
-    });
-  }
+      startGps();
+    },
+    () => {
+      btn.textContent = 'No fix'; btn.disabled = false;
+      setTimeout(() => { btn.textContent = 'Find me'; }, 3000);
+    },
+    { enableHighAccuracy:true, timeout:20000, maximumAge:5000 });
 });
 document.getElementById('btnCsv').addEventListener('click', async () => {
   if(!points.length) return;
@@ -1690,8 +1752,8 @@ document.getElementById('btnCsv').addEventListener('click', async () => {
   setTimeout(() => { btn.textContent = 'Copy CSV'; }, 2500);
 });
 document.getElementById('btnJson').addEventListener('click', () => {
-  download('mini-mapper-backup.json',
-    JSON.stringify({ app:'mini-mapper', build:BUILD_NUM, saved:new Date().toISOString(),
+  download('inshore-mini-mapper-backup.json',
+    JSON.stringify({ app:'inshore-mini-mapper', build:BUILD_NUM, saved:new Date().toISOString(),
                      passes, points: points.map(ptPack) }), 'application/json');
 });
 document.getElementById('btnReduce').addEventListener('click', async () => {

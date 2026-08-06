@@ -1,4 +1,4 @@
-# Mini Mapper
+# Inshore Mini Mapper
 
 A map of every depth Jan has measured himself, reduced to **MLLW** — the datum a
 chart is printed to — so readings taken at different tides are comparable with
@@ -8,7 +8,7 @@ Single file, no build step. Open `index.html`, or serve the folder:
 
     python3 -m http.server 8791 --directory .
 
-Intended for `janfishes/minimapper` on GitHub Pages, alongside
+Intended for `janfishes/inshore-minimapper` on GitHub Pages, alongside
 [`janfishes/tideboard`](https://janfishes.github.io/tideboard/) and
 [`janfishes/WTF`](https://janfishes.github.io/WTF/).
 
@@ -69,8 +69,7 @@ this works.
 
 ## Shared state with the tide board
 
-Both apps live on `janfishes.github.io`, so they share a localStorage area. Mini
-Mapper **reads** the tide board's calibrations — `tide-lags`, `tide-positions`,
+Both apps live on `janfishes.github.io`, so they share a localStorage area. Inshore Inshore Mini Mapper **reads** the tide board's calibrations — `tide-lags`, `tide-positions`,
 `tide-added-spots` — which is why it has no calibration screen of its own: a lag
 Jan times on the water belongs to the board, and improves every sounding here
 the next time *Re-reduce everything* is run. It **writes** exactly one key,
