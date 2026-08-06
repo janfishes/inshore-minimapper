@@ -325,6 +325,7 @@
       <button class="btn" id="btnCircleHere">Circle this spot</button>
       <button class="btn" id="btnDrawLine">Draw a line</button>
       <button class="btn" id="btnDisarm">Disarm</button>
+      <button class="btn" id="btnWpt">Waypoints for the plotter</button>
     </div>
 
     <div id="lnList"></div>
@@ -2122,6 +2123,35 @@ function renderTargets(){
   el.querySelectorAll('[data-open]').forEach(b => b.addEventListener('click', () => renderDetail(b.dataset.open)));
 }
 
+/* WAYPOINTS OUT TO THE PLOTTER.
+
+   To repeat a circle you have to know where its centre is while you are
+   driving, and the instrument for that is already on the boat: the 74sv
+   shows range and bearing to a waypoint continuously, which is exactly
+   what holding a radius needs. Watching a phone while running a trolling
+   motor round a tight turn is the worse tool by a distance.
+
+   So every mark and circle goes out as a GPX waypoint file. Copy it to
+   /Garmin/GPX/ on the card, then Nav Info > User Data > Data Transfer >
+   Merge From Card. The circle's radius rides in the description, because
+   there is nowhere on a plotter waypoint to put it. */
+function targetsGPX(){
+  const esc2 = t => String(t).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+  const body = targets.map(t => {
+    const [la, ln] = t.pts[0];
+    const desc = t.kind === 'circle'
+      ? 'Hold ' + Math.round(t.rFt || DEFAULT_CIRCLE_R) + ' ft range and circle it'
+      : (t.kind === 'mark' ? 'Repeat sounding mark' : 'Start of repeat line');
+    return '  <wpt lat="' + la.toFixed(7) + '" lon="' + ln.toFixed(7) + '">\n'
+         + '    <name>' + esc2(t.name.slice(0,30)) + '</name>\n'
+         + '    <desc>' + esc2(desc) + '</desc>\n'
+         + '    <sym>Circle with X</sym>\n  </wpt>';
+  }).join('\n');
+  return '<?xml version="1.0" encoding="UTF-8"?>\n'
+    + '<gpx version="1.1" creator="Inshore Mini Mapper" xmlns="http://www.topografix.com/GPX/1/1">\n'
+    + body + '\n</gpx>\n';
+}
+
 function drawTargets(){
   if(!map) return;
   if(!targetLayer) targetLayer = L.layerGroup().addTo(map);
@@ -2410,6 +2440,14 @@ document.getElementById('btnDrawLine').addEventListener('click', () => {
 document.getElementById('btnDisarm').addEventListener('click', () => {
   if(drawing){ drawing = null; if(drawLayer) drawLayer.clearLayers(); }
   armed = null; targetsSave(); renderTargets(); renderStrip(); drawTargets();
+});
+document.getElementById('btnWpt').addEventListener('click', () => {
+  if(!targets.length){ note('lnDetail','warnbox','Nothing to send yet — mark a spot or circle one first.'); return; }
+  download('minimapper-marks.gpx', targetsGPX(), 'application/gpx+xml');
+  note('lnDetail','okbox','<b>' + targets.length + ' waypoint' + (targets.length === 1 ? '' : 's')
+    + ' downloaded.</b> Copy <b>minimapper-marks.gpx</b> to <b>/Garmin/GPX/</b> on the card, then on the unit: '
+    + '<b>Nav Info &rarr; User Data &rarr; Data Transfer &rarr; Merge From Card</b>. '
+    + 'Then steer to the waypoint and hold the range the description gives.');
 });
 document.getElementById('btnCsv').addEventListener('click', async () => {
   if(!points.length) return;
