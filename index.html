@@ -1157,7 +1157,37 @@ function nearestName(lat,lng){
 /* =====================================================================
    LOGGING — GPS, the live reading, and the tap
    ===================================================================== */
-let fix = null, watchId = null;
+let fix = null, watchId = null, gpsErr = null;
+
+/* WHY THERE IS NO POSITION, said plainly.
+
+   The first version answered every failure with "no fix yet — open this
+   outdoors and give it a moment", which is true for exactly one of the
+   ways this fails and actively misleading for the rest. Standing outdoors
+   for ten minutes will not fix a denied permission, and it will never fix
+   the commonest one of all: opening the app from a phone by typing the
+   Mac's address, which is a plain http:// page and therefore not allowed a
+   position at all. The browser is not being coy about which it is — it
+   hands over an error code — so the code is what gets reported. */
+function gpsProblem(){
+  if(!navigator.geolocation) return { head:'This browser has no location service.',
+    fix:'Type a position instead — the reading is worth the same.' };
+  if(!window.isSecureContext) return { head:'This page is not allowed a position.',
+    fix:'It is being served over plain <b>http</b>, and browsers only give a location to <b>https</b> '
+      + 'pages (or to <b>localhost</b> on the same machine). If you typed the Mac’s address into a phone, '
+      + 'that is this. Open the published site instead, or type a position below.' };
+  if(!gpsErr) return null;
+  if(gpsErr.code === 1) return { head:'Location is switched off for this page.',
+    fix:'The browser was asked and said no. In <b>Safari</b>: Settings → Websites → Location, set this site '
+      + 'to Ask or Allow, then reload. On the <b>iPhone</b> also check Settings → Privacy → Location Services. '
+      + 'On the <b>Mac</b>, System Settings → Privacy &amp; Security → Location Services must be on for the browser too.' };
+  if(gpsErr.code === 2) return { head:'The device cannot work out where it is.',
+    fix:'Indoors, or with Wi-Fi and location services off, there is nothing for it to go on. Outdoors it '
+      + 'usually comes good in under a minute.' };
+  if(gpsErr.code === 3) return { head:'Location timed out.',
+    fix:'It was allowed but nothing arrived in twenty seconds. Tap <b>Find me</b> to ask again.' };
+  return { head:'No position.', fix: esc(gpsErr.message || '') };
+}
 
 function startGps(){
   if(watchId !== null || !navigator.geolocation) return;
@@ -1168,16 +1198,20 @@ function startGps(){
       if(bk && !depthBlocks.has(bk)) depthLoadBlock(bk).then(renderRead);
       renderGps(); renderRead(); drawHere(); renderStrip();
     },
-    () => { renderGps(); },
+    err => { gpsErr = err; renderGps(); renderStrip(); },
     { enableHighAccuracy:true, maximumAge:2000, timeout:20000 });
 }
 function renderGps(){
   const el = document.getElementById('gpsLine');
   if(!fix){
+    const pb = gpsProblem();
     el.className = 'gps stale';
-    el.textContent = 'GPS: no fix yet — open this outdoors and give it a moment. You can still type a position below.';
+    el.innerHTML = pb
+      ? '<span class="pos">' + pb.head + '</span>' + pb.fix
+      : 'Waiting for a position&hellip; you can still type one in below.';
     return;
   }
+  gpsErr = null;
   const age = (Date.now() - fix.at)/1000;
   el.className = 'gps' + (age > 30 || fix.acc > 30 ? ' stale' : '');
   const nc = nearestName(fix.lat, fix.lng);
@@ -2359,8 +2393,11 @@ document.getElementById('btnHere').addEventListener('click', () => {
       map.setView([fix.lat, fix.lng], 16);
       startGps();
     },
-    () => {
+    err => {
+      gpsErr = err;
       btn.textContent = 'No fix'; btn.disabled = false;
+      renderGps();
+      document.getElementById('logBox').open = true;
       setTimeout(() => { btn.textContent = 'Find me'; }, 3000);
     },
     { enableHighAccuracy:true, timeout:20000, maximumAge:5000 });
