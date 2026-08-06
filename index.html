@@ -169,6 +169,23 @@
   input[type=file]{display:none}
   .passrow{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid var(--hair);
     font-family:var(--mono);font-size:11px;align-items:baseline}
+  /* ---- repeat lines ---- */
+  .lnstrip{
+    font-family:var(--mono);font-size:12px;line-height:1.5;border-radius:3px;
+    padding:8px 10px;margin-bottom:10px;border:1px solid var(--hair);background:#F7F9FA;
+  }
+  .lnstrip.on{background:var(--go-soft);border-color:var(--go);color:var(--go)}
+  .lnstrip.off{background:var(--warn-soft);border-color:var(--warn);color:var(--warn)}
+  .lnstrip .big{font-size:17px;font-weight:700;display:block}
+  .lnrow{display:flex;justify-content:space-between;gap:8px;padding:7px 0;border-bottom:1px solid var(--hair);
+    font-family:var(--mono);font-size:12px;align-items:baseline;flex-wrap:wrap}
+  .lnrow .lnname{font-weight:700;cursor:pointer;text-decoration:underline dotted}
+  .lnrow .lnmeta{color:var(--ink-soft);font-size:10px;display:block;text-decoration:none;font-weight:400}
+  .prof{width:100%;height:auto;display:block;margin-top:8px;background:var(--paper);
+    border:1px solid var(--hair);border-radius:3px}
+  .proflegend{display:flex;flex-wrap:wrap;gap:4px 12px;font-family:var(--mono);font-size:10px;margin-top:6px}
+  .proflegend span{display:inline-flex;align-items:center;gap:4px;color:var(--ink-soft)}
+  .proflegend i{width:14px;height:3px;border-radius:2px;display:inline-block}
   /* divIcon paints a white box by default — the pin has to be the only
      thing that shows. */
   .here-pin{background:none;border:0;filter:drop-shadow(0 1px 2px rgba(14,31,46,.45))}
@@ -291,6 +308,40 @@
       <b>Garmin writes metres even when the screen says feet.</b> The gpxx schema defines depth in metres and
       the unit converts on the way out. This converts once, and says so on every import &mdash; if a number
       looks four times too shallow, that is the trap you are looking at.
+    </div>
+  </div>
+</details>
+
+<details class="card" id="linesBox">
+  <summary>Repeat measurements <span class="hint">the same water twice, months apart</span></summary>
+  <div class="body">
+    <p>A single sounding says what the bottom was. <b>The same spot measured again says which way it is
+       going</b> &mdash; and that is the one thing no survey of this water can tell you.</p>
+
+    <div class="lnstrip" id="lnStrip">Nothing armed. Mark a spot or draw a line below, then come back to it.</div>
+
+    <div class="foot">
+      <button class="btn" id="btnMarkHere">Mark this spot</button>
+      <button class="btn" id="btnCircleHere">Circle this spot</button>
+      <button class="btn" id="btnDrawLine">Draw a line</button>
+      <button class="btn" id="btnDisarm">Disarm</button>
+    </div>
+
+    <div id="lnList"></div>
+    <div id="lnDetail"></div>
+
+    <div class="note">
+      <b>A tape or a lead line is the better instrument for this, and it is not close.</b> Your own boat data
+      measures why: crossing the same 15 m of water twice in one afternoon &mdash; with nothing having moved
+      &mdash; the sounder disagreed with itself by about <b>1 ft</b> typically and over <b>4 ft</b> one time in
+      ten, because a boat crossing a slope 10 m to one side is reading a different piece of bottom. A tape at a
+      marked spot has none of that: no transducer offset, no cone spreading with depth, no drift, and you can
+      stand on the same foot of bottom every time. So a <b>mark</b> measured by hand can show a change of half a
+      foot honestly, where a <b>line</b> run with the sounder cannot show three.
+      <br><br>
+      Both are worth having &mdash; a line finds <i>where</i> the bottom is moving, a mark measures <i>how
+      much</i>. Every reading keeps the method it was taken with, and the history below is judged against
+      that method's own noise, never one blanket number.
     </div>
   </div>
 </details>
@@ -766,11 +817,15 @@ let passes = [];     // {id,label,when,n,src}
 function ptPack(p){
   return [Math.round(p.t/1000), +p.lat.toFixed(6), +p.lng.toFixed(6), +p.ft.toFixed(2),
           +(p.off||0).toFixed(2), p.method || 'sounder', p.name || '', p.pass || '',
-          p.mllw == null ? null : +p.mllw.toFixed(2), p.tide == null ? null : +p.tide.toFixed(2)];
+          p.mllw == null ? null : +p.mllw.toFixed(2), p.tide == null ? null : +p.tide.toFixed(2),
+          p.target || '', p.station == null ? null : +p.station.toFixed(1)];
 }
 function ptUnpack(a){
+  /* Slots 10 and 11 arrived with repeat measurements; anything stored
+     before that simply has no target, which is what undefined means here. */
   return { t:a[0]*1000, lat:a[1], lng:a[2], ft:a[3], off:a[4], method:a[5],
-           name:a[6], pass:a[7], mllw:a[8], tide:a[9] };
+           name:a[6], pass:a[7], mllw:a[8], tide:a[9],
+           target:a[10] || null, station:a[11] == null ? null : a[11] };
 }
 function savePoints(){
   const ok = lsSet(LS.pts, JSON.stringify(points.map(ptPack)));
@@ -922,6 +977,9 @@ function initMap(){
      together are a megabyte of lines and drawing the lot would stall the
      map. Only redrawn while they are actually switched on. */
   map.on('moveend', () => { if(showSurvey) drawSurvey(); });
+  /* Only while a line is being tapped out — otherwise a tap on the map is
+     just a tap on the map, and a stray vertex is a hard thing to notice. */
+  map.on('click', e => { if(drawing) drawTapped(e); });
 }
 
 /* 5,000 dots is a lot of canvas at wide zoom, and at z12 they land on top
@@ -1108,7 +1166,7 @@ function startGps(){
       fix = { lat:pos.coords.latitude, lng:pos.coords.longitude, acc:pos.coords.accuracy, at:Date.now() };
       const bk = blockFor(fix.lat, fix.lng);
       if(bk && !depthBlocks.has(bk)) depthLoadBlock(bk).then(renderRead);
-      renderGps(); renderRead(); drawHere();
+      renderGps(); renderRead(); drawHere(); renderStrip();
     },
     () => { renderGps(); },
     { enableHighAccuracy:true, maximumAge:2000, timeout:20000 });
@@ -1199,6 +1257,15 @@ function renderRead(){
 }
 
 function addPoint(p){
+  /* Anything logged while a target is armed belongs to it, and carries its
+     station — feet along a line, degrees round a circle — so it lands on
+     the profile in the right place without being re-matched later. */
+  const t = armed ? targetById(armed) : null;
+  if(t){
+    const pr = projectTo(p.lat, p.lng, t);
+    p.target = t.id;
+    p.station = t.kind === 'circle' ? pr.station : pr.station*FT_PER_M;
+  }
   points.push(p);
   savePoints();
   reduceAll([p]).then(() => { drawPoints(); renderTally(); });
@@ -1494,6 +1561,561 @@ function renderPasses(){
 }
 
 /* =====================================================================
+   REPEAT MEASUREMENTS — the same water twice
+
+   A sounding says what the bottom WAS. Only a second visit says which way
+   it is going, and that is the one thing the survey can never supply here.
+
+   Two shapes, because two instruments:
+
+   A MARK is one position you stand on again. It is the accurate one. A
+   tape or a lead line has no transducer offset, no cone spreading with
+   depth, and no drift, so the only error left is how well you got back to
+   the same foot of bottom.
+
+   A LINE is a track you run again with the sounder. It covers ground a
+   tape never could and finds WHERE the bottom is moving — but a boat
+   crossing a slope ten metres off the old track is reading a different
+   piece of bottom, and that error swamps a season's shoaling.
+
+   Measured on Jan's own 5,369 points: cells crossed TWICE ON THE SAME DAY,
+   when nothing can have moved, still disagreed by a median of 0.99 ft and
+   over 4 ft one time in ten. That number is the floor under any claim of
+   change, and it is why the history below is judged per method rather than
+   against one blanket figure.
+   ===================================================================== */
+let targets = [];      // {id,name,kind:'mark'|'line',pts:[[lat,lng]],rFt}
+let armed = null;      // id of the target being worked
+let drawing = null;    // [[lat,lng],...] while a line is being tapped out
+let drawLayer = null, targetLayer = null;
+
+const LS_TARGETS = 'mm-targets', LS_ARMED = 'mm-armed';
+const DEFAULT_MARK_R = 25;    // ft — how close counts as "back on it"
+const DEFAULT_LINE_R = 40;    // ft — corridor half-width
+const DEFAULT_CIRCLE_R = 30;  // ft — the ring the trolling motor holds
+const CIRCLE_BAND_FT = 12;    // ft — how far off the ring still counts as on it
+
+/* The floor under a claim of change, per instrument. A tape reading
+   repeated at a mark is good to a few inches; a sounder dragged across a
+   slope is not. These are the DEFAULTS — where the data can measure its
+   own floor (two readings of the same target on the same day, when nothing
+   moved), that measurement wins, because it includes this boat, this
+   water and this way of working rather than an assumption about them. */
+const METHOD_FLOOR = { tape:0.3, lead:0.3, sonar:0.5, sounder:1.0 };
+function floorFor(methods){
+  let f = 0;
+  for(const m of methods) f = Math.max(f, METHOD_FLOOR[m] != null ? METHOD_FLOOR[m] : 1.0);
+  return f || 1.0;
+}
+
+function targetsLoad(){
+  targets = lsJSON(LS_TARGETS, []) || [];
+  armed = lsGet(LS_ARMED) || null;
+  if(armed && !targets.some(t => t.id === armed)) armed = null;
+}
+const targetsSave = () => { lsSet(LS_TARGETS, JSON.stringify(targets)); lsSet(LS_ARMED, armed || ''); };
+const targetById = id => targets.find(t => t.id === id) || null;
+
+/* ---- geometry, in metres on a local flat earth ----
+   Over a line a few hundred yards long the curvature is far below the GPS
+   error, so the simple projection is the honest one. */
+const FT_PER_M = 3.280839895;
+function metric(lat0, lng0, lat, lng){
+  const kx = 111320*Math.cos(lat0*Math.PI/180), ky = 110540;
+  return [ (lng - lng0)*kx, (lat - lat0)*ky ];
+}
+/* Where a position sits relative to a target: how far off, and for a line,
+   how far ALONG it. Station is what makes two passes comparable — it is
+   the x-axis of the profile, so a reading from April and one from July at
+   the same station are readings of the same piece of bottom. */
+function projectTo(lat, lng, t){
+  const [lat0, lng0] = t.pts[0];
+  const [px, py] = metric(lat0, lng0, lat, lng);
+  if(t.kind === 'mark'){
+    const d = Math.hypot(px, py);
+    return { distM:d, station:0, total:0, bearing:(Math.atan2(px, py)*180/Math.PI + 360) % 360 };
+  }
+  /* A CIRCLE's coordinate is the BEARING FROM ITS CENTRE, and that is the
+     whole reason it is the better repeat. On a line, "station" depends on
+     where you happened to start and how straight you actually ran, so two
+     passes have to be registered against each other before they can be
+     compared. On a circle there is nothing to register: 040 degrees from
+     the mark is 040 degrees from the mark in April and in July. Being off
+     is being off the RING — inside or outside the radius, not off to one
+     side. */
+  if(t.kind === 'circle'){
+    const R = (t.rFt || DEFAULT_CIRCLE_R)/FT_PER_M;
+    const d = Math.hypot(px, py);
+    const brg = (Math.atan2(px, py)*180/Math.PI + 360) % 360;
+    return { distM:Math.abs(d - R), station:brg, total:360, bearing:brg,
+             fromCentreM:d, outside:d > R, radiusM:R };
+  }
+  const xy = t.pts.map(p => metric(lat0, lng0, p[0], p[1]));
+  let best = null, acc = 0;
+  for(let i = 0; i < xy.length - 1; i++){
+    const [ax,ay] = xy[i], [bx,by] = xy[i+1];
+    const dx = bx-ax, dy = by-ay, L2 = dx*dx + dy*dy, L = Math.sqrt(L2);
+    let tt = L2 > 0 ? ((px-ax)*dx + (py-ay)*dy)/L2 : 0;
+    tt = tt < 0 ? 0 : (tt > 1 ? 1 : tt);
+    const ex = ax + tt*dx, ey = ay + tt*dy;
+    const d = Math.hypot(px-ex, py-ey);
+    /* Sign of the cross product = which side of the line you are on, so
+       the strip can say LEFT or RIGHT rather than just "40 ft off". */
+    const side = Math.sign(dx*(py-ay) - dy*(px-ax)) || 1;
+    if(!best || d < best.distM) best = { distM:d, station:acc + tt*L, side };
+    acc += L;
+  }
+  best.total = acc;
+  return best;
+}
+const COMPASS = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+const compassOf = deg => COMPASS[Math.round(((deg % 360) + 360) % 360 / 22.5) % 16];
+
+/* ---- the strip you read standing up ---- */
+function renderStrip(){
+  const el = document.getElementById('lnStrip');
+  if(!el) return;
+  if(drawing){
+    el.className = 'lnstrip off';
+    el.innerHTML = '<span class="big">Drawing a line &mdash; ' + drawing.length + ' point'
+      + (drawing.length === 1 ? '' : 's') + '</span>Tap the map along the run you want to repeat. '
+      + 'Two points is a straight line; add more to follow a channel. Then tap <b>Finish line</b>.';
+    return;
+  }
+  const t = armed ? targetById(armed) : null;
+  if(!t){
+    el.className = 'lnstrip';
+    el.textContent = 'Nothing armed. Mark a spot or draw a line below, then come back to it.';
+    return;
+  }
+  if(!fix){
+    el.className = 'lnstrip';
+    el.innerHTML = '<span class="big">' + esc(t.name) + ' armed</span>Waiting for a position &mdash; '
+      + 'anything you log is tagged to it either way.';
+    return;
+  }
+  const p = projectTo(fix.lat, fix.lng, t);
+  const offFt = p.distM*FT_PER_M, r = t.rFt || (t.kind === 'mark' ? DEFAULT_MARK_R : DEFAULT_LINE_R);
+  const on = offFt <= r;
+  el.className = 'lnstrip ' + (on ? 'on' : 'off');
+  if(t.kind === 'circle'){
+    /* Hold the radius. The number that matters is how far off the RING you
+       are, and which way to correct — the trolling motor is already doing
+       the steering, so this only has to say in or out. */
+    const inOut = p.outside ? 'come IN' : 'go OUT';
+    el.innerHTML = '<span class="big">' + (on ? 'ON THE RING' : Math.round(offFt) + ' ft ' + (p.outside ? 'outside' : 'inside'))
+      + '</span>' + esc(t.name) + ' &mdash; hold <b>' + Math.round(t.rFt || DEFAULT_CIRCLE_R) + ' ft</b>'
+      + (on ? '.' : ', ' + inOut + '.')
+      + '<br>bearing <b>' + Math.round(p.bearing) + '&deg;</b> from the mark ('
+      + compassOf(p.bearing) + ') <span class="est">&middot; GPS &plusmn;' + Math.round(fix.acc) + ' m</span>';
+  } else if(t.kind === 'mark'){
+    el.innerHTML = '<span class="big">' + (on ? 'ON THE MARK' : Math.round(offFt) + ' ft off')
+      + '</span>' + esc(t.name)
+      + (on ? ' &mdash; take the reading.' : ' &mdash; head <b>' + compassOf(p.bearing) + '</b> ('
+          + Math.round(p.bearing) + '&deg;T).')
+      + '<br><span class="est">GPS &plusmn;' + Math.round(fix.acc) + ' m'
+      + (fix.acc*FT_PER_M > r ? ' &mdash; wider than the mark itself, so wait for it to settle' : '')
+      + '</span>';
+  } else {
+    el.innerHTML = '<span class="big">' + (on ? 'ON THE LINE' : Math.round(offFt) + ' ft off')
+      + '</span>' + esc(t.name) + ' &mdash; '
+      + (on ? '' : 'steer <b>' + (p.side > 0 ? 'right' : 'left') + '</b> &middot; ')
+      + Math.round(p.station*FT_PER_M) + ' ft along of ' + Math.round(p.total*FT_PER_M) + '.'
+      + '<br><span class="est">GPS &plusmn;' + Math.round(fix.acc) + ' m</span>';
+  }
+}
+
+/* ---- creating targets ---- */
+function markHere(){
+  if(!fix){ note('lnDetail','warnbox','No position yet — tap <b>Find me</b> first.'); return; }
+  const near = nearestName(fix.lat, fix.lng);
+  const suggested = near && near.yd < 200 ? near.name : (near ? near.name + ' area' : 'Mark');
+  const name = (prompt('Name this mark — somewhere you will come back to and measure again:', suggested) || '').trim();
+  if(!name) return;
+  const t = { id:'t' + Date.now().toString(36), name, kind:'mark',
+              pts:[[fix.lat, fix.lng]], rFt:DEFAULT_MARK_R };
+  targets.push(t); armed = t.id; targetsSave();
+  gatherInto(t);
+  renderTargets(); renderStrip(); drawTargets();
+}
+/* A CIRCLE ROUND THE MARK — the trolling motor's own shape.
+
+   Worth more than it looks. Three things a straight line cannot do:
+
+   1. IT CLOSES ON ITSELF. Come back round to the bearing you started at and
+      you are over the same bottom, so any disagreement between the first
+      reading and the last is pure drift — tide reduction, offset, GPS bias
+      over the run. A closed loop measures its own error. A straight line
+      has no such check, which is why surveyors close their traverses.
+   2. IT MEASURES THE SLOPE. The spread of depths right round a ring at
+      fixed radius IS the local gradient, and the gradient is exactly what
+      turns a position error into a depth error. Knowing it turns "the
+      sounder disagreed with itself by a foot" from a mystery into
+      arithmetic: error = slope x how far off you were.
+   3. IT NEEDS NO REGISTRATION. Two passes are comparable point for point,
+      because the coordinate is the bearing from the centre and that does
+      not depend on where you started.
+
+   So: the line finds WHERE the bottom moves, the circle measures HOW MUCH
+   and proves its own number. Run the circle at two radii on the same trip
+   and the pair gives the slope outward from the hole as well. */
+function circleHere(){
+  if(!fix){ note('lnDetail','warnbox','No position yet — tap <b>Find me</b> first.'); return; }
+  const near = nearestName(fix.lat, fix.lng);
+  const suggested = near && near.yd < 200 ? near.name + ' ring' : 'Ring';
+  const name = (prompt('Name this circle — the trolling motor holds a fixed radius round this spot:', suggested) || '').trim();
+  if(!name) return;
+  const r = parseFloat(prompt('Radius in feet — how wide a circle can you hold?\n\n'
+    + 'Tighter reads more of the hole itself; wider catches more of the rim and the slope.', DEFAULT_CIRCLE_R));
+  const t = { id:'t' + Date.now().toString(36), name, kind:'circle',
+              pts:[[fix.lat, fix.lng]], rFt: (isFinite(r) && r > 5 && r < 400) ? Math.round(r) : DEFAULT_CIRCLE_R };
+  targets.push(t); armed = t.id; targetsSave();
+  gatherInto(t);
+  renderTargets(); renderStrip(); drawTargets();
+}
+
+function startDrawing(){
+  drawing = []; armed = null;
+  if(!drawLayer) drawLayer = L.layerGroup().addTo(map);
+  drawLayer.clearLayers();
+  renderTargets(); renderStrip();
+  document.getElementById('map').scrollIntoView({behavior:'smooth', block:'center'});
+}
+function drawTapped(e){
+  if(!drawing) return;
+  drawing.push([e.latlng.lat, e.latlng.lng]);
+  drawLayer.clearLayers();
+  L.polyline(drawing, { color:'#4a3aa7', weight:3, dashArray:'6 5' }).addTo(drawLayer);
+  for(const p of drawing) L.circleMarker(p, { radius:4, color:'#ffffff', weight:2,
+    fillColor:'#4a3aa7', fillOpacity:1 }).addTo(drawLayer);
+  renderTargets(); renderStrip();
+}
+function finishDrawing(){
+  if(!drawing || drawing.length < 2){ drawing = null; if(drawLayer) drawLayer.clearLayers();
+    renderTargets(); renderStrip(); return; }
+  const name = (prompt('Name this line — the run you want to be able to repeat:', 'Line ' + (targets.length+1)) || '').trim();
+  if(!name){ drawing = null; drawLayer.clearLayers(); renderTargets(); renderStrip(); return; }
+  const t = { id:'t' + Date.now().toString(36), name, kind:'line', pts:drawing.slice(), rFt:DEFAULT_LINE_R };
+  targets.push(t); armed = t.id; drawing = null;
+  drawLayer.clearLayers();
+  targetsSave();
+  gatherInto(t);
+  renderTargets(); renderStrip(); drawTargets();
+}
+
+/* Soundings already taken get pulled in rather than being left behind — a
+   line drawn over water Jan has already run starts with its first pass
+   already in it, which is the only reason there is anything to compare
+   today. Existing tags are not overwritten. */
+function gatherInto(t){
+  const r = t.kind === 'circle' ? CIRCLE_BAND_FT
+          : (t.rFt || (t.kind === 'mark' ? DEFAULT_MARK_R : DEFAULT_LINE_R));
+  let n = 0;
+  for(const p of points){
+    if(p.mllw == null || p.target) continue;
+    const pr = projectTo(p.lat, p.lng, t);
+    if(pr.distM*FT_PER_M <= r){
+      p.target = t.id;
+      /* Station is FEET ALONG for a line and DEGREES AROUND for a circle.
+         The profile knows which by the target's kind; nothing else reads it. */
+      p.station = t.kind === 'circle' ? pr.station : pr.station*FT_PER_M;
+      n++;
+    }
+  }
+  if(n) savePoints();
+  return n;
+}
+
+/* ---- history: what actually changed, and whether to believe it ---- */
+/* Comparing two visits is a REGISTRATION problem, and getting it wrong is
+   how a repeat map comes to lie.
+
+   The first version of this compared the median of everything logged on one
+   day against the median of everything logged on another, and on the first
+   real circle it produced nonsense: 15 readings in April against 239 in
+   April, 1 in May. Those medians are not of the same bottom. A ring on a
+   channel edge spans 15 to 28 ft of genuine depth, so whichever arc you
+   happened to cover decides the median, and the difference between two
+   visits was mostly a difference in coverage.
+
+   So everything below is PAIRED BY STATION. The target is cut into bins —
+   15 degrees round a circle, 25 ft along a line — and a visit is a set of
+   bin medians. Two visits are compared only where they SHARE bins, and the
+   change is the median of the per-bin differences. Bottom that only one
+   visit crossed contributes nothing, which is right: it is not evidence of
+   change, it is evidence of where the boat went.
+
+   The same correction fixes the noise floor. Pooled same-day spread was
+   measuring the slope of the bottom, not the error of the instrument —
+   9.1 ft on that first circle, which would have buried any real change
+   forever. Within ONE bin on ONE day, nothing has moved and the ground is
+   the same ground, so what is left is the error. That is the floor. */
+const BIN_DEG = 15, BIN_FT = 25;
+function binOf(t, station){
+  if(station == null) return 0;
+  if(t.kind === 'circle') return Math.floor((((station % 360) + 360) % 360)/BIN_DEG);
+  if(t.kind === 'line')   return Math.floor(station/BIN_FT);
+  return 0;                       // a mark is one piece of bottom
+}
+function passesOf(t){
+  const mine = points.filter(p => p.target === t.id && p.mllw != null);
+  const byDay = new Map();
+  for(const p of mine){
+    const k = new Date(p.t).toISOString().slice(0,10);
+    if(!byDay.has(k)) byDay.set(k, []);
+    byDay.get(k).push(p);
+  }
+  return [...byDay.entries()].sort((a,b) => a[0].localeCompare(b[0]))
+    .map(([day, pts]) => {
+      const cells = new Map();
+      for(const p of pts){
+        const b = binOf(t, p.station);
+        if(!cells.has(b)) cells.set(b, []);
+        cells.get(b).push(p.mllw);
+      }
+      const bins = new Map();
+      for(const [b, v] of cells) bins.set(b, median(v));
+      return { day, pts, n:pts.length, cells, bins,
+               med: median([...bins.values()]),
+               methods: [...new Set(pts.map(p => p.method))] };
+    });
+}
+/* The change from one visit to the next, over the ground they BOTH crossed. */
+function changeBetween(a, b){
+  const diffs = [];
+  for(const [bin, v] of b.bins){
+    if(a.bins.has(bin)) diffs.push(v - a.bins.get(bin));
+  }
+  if(!diffs.length) return { shared:0, med:null };
+  return { shared:diffs.length, med:median(diffs),
+           spread: Math.max(...diffs) - Math.min(...diffs) };
+}
+/* Two readings in the same bin on the same day cannot differ because the
+   bottom moved. Whatever they differ by is the instrument, the position and
+   the reduction — this boat, this water, this way of working. */
+function noiseFloor(t, passes){
+  const within = [];
+  for(const p of passes){
+    for(const [, v] of p.cells){
+      if(v.length > 1) within.push(Math.max(...v) - Math.min(...v));
+    }
+  }
+  if(within.length >= 3) return { ft: median(within), src:'measured', n:within.length };
+  const methods = [...new Set(passes.flatMap(p => p.methods))];
+  return { ft: floorFor(methods), src:'assumed', n:0 };
+}
+
+const CAT = ['#2a78d6','#eb6834','#1baf7a','#eda100','#e87ba4','#008300','#4a3aa7','#e34948'];
+
+/* A PROFILE, not a red-and-blue change map. The traces are drawn on top of
+   each other so the disagreement between passes is visible in the same
+   picture as the change — which is the honest way round. A change map hides
+   exactly the thing you need to judge it by. */
+function profileSVG(t, passes){
+  const withPts = passes.filter(p => p.pts.length > 1);
+  if(withPts.length < 1) return '';
+  const W = 640, H = 260, mL = 44, mR = 12, mT = 12, mB = 30;
+  const all = withPts.flatMap(p => p.pts);
+  const circ = t.kind === 'circle';
+  const xMax = circ ? 360 : Math.max(...all.map(p => p.station || 0), 1);
+  const yMax = Math.max(...all.map(p => p.mllw), 1);
+  const X = s => mL + (s/xMax)*(W - mL - mR);
+  /* Depth runs DOWNWARD: this is a picture of the bottom, and a bottom
+     that rises when it gets shallower is a graph nobody reads correctly. */
+  const Y = d => mT + (d/(yMax*1.1))*(H - mT - mB);
+  let g = '';
+  for(let i = 0; i <= 4; i++){
+    const d = yMax*1.1*i/4, y = Y(d);
+    g += '<line x1="' + mL + '" y1="' + y.toFixed(1) + '" x2="' + (W-mR) + '" y2="' + y.toFixed(1)
+       + '" stroke="#C4CBD1" stroke-width="1"/>'
+       + '<text x="' + (mL-6) + '" y="' + (y+3.5).toFixed(1) + '" text-anchor="end" font-size="10" '
+       + 'font-family="monospace" fill="#4A5A66">' + d.toFixed(0) + '</text>';
+  }
+  if(circ){
+    /* Compass round the ring, so a bump on the trace is a compass bearing
+       you can steer to rather than a distance you have to pace out. */
+    for(const b of [0,90,180,270]){
+      g += '<text x="' + X(b).toFixed(1) + '" y="' + (H-8) + '" text-anchor="middle" font-size="10" '
+         + 'font-family="monospace" fill="#4A5A66">' + compassOf(b) + '</text>';
+    }
+    g += '<text x="' + (W-mR) + '" y="' + (H-8) + '" text-anchor="end" font-size="10" '
+       + 'font-family="monospace" fill="#4A5A66">round the ring</text>';
+  } else {
+    g += '<text x="' + mL + '" y="' + (H-8) + '" font-size="10" font-family="monospace" fill="#4A5A66">0 ft along</text>'
+       + '<text x="' + (W-mR) + '" y="' + (H-8) + '" text-anchor="end" font-size="10" font-family="monospace" '
+       + 'fill="#4A5A66">' + Math.round(xMax) + ' ft</text>';
+  }
+  withPts.slice(-8).forEach((p, i) => {
+    const sorted = p.pts.slice().sort((a,b) => (a.station||0) - (b.station||0));
+    const d = sorted.map((q,j) => (j ? 'L' : 'M') + X(q.station||0).toFixed(1) + ' ' + Y(q.mllw).toFixed(1)).join(' ');
+    g += '<path d="' + d + '" fill="none" stroke="' + CAT[i % CAT.length]
+       + '" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" opacity=".9"/>';
+  });
+  return '<svg class="prof" viewBox="0 0 ' + W + ' ' + H + '" role="img" '
+    + 'aria-label="Depth at MLLW along the line, one trace per pass">' + g + '</svg>'
+    + '<div class="proflegend">' + withPts.slice(-8).map((p,i) =>
+        '<span><i style="background:' + CAT[i % CAT.length] + '"></i>'
+        + new Date(p.day + 'T12:00').toLocaleDateString([], {month:'numeric', day:'numeric', year:'2-digit'})
+        + '</span>').join('') + '</div>';
+}
+
+function renderDetail(id){
+  const el = document.getElementById('lnDetail');
+  const t = targetById(id);
+  if(!t){ el.innerHTML = ''; return; }
+  const passes = passesOf(t);
+  const nf = noiseFloor(t, passes);
+  let h = '<div class="tally"><div class="t-row head"><span>' + esc(t.name) + '</span><span>at MLLW</span></div>';
+  if(!passes.length){
+    h += '<div class="t-row"><span class="est">Nothing measured here yet</span><span></span></div>';
+  }
+  let prev = null;
+  for(const p of passes){
+    const when = new Date(p.day + 'T12:00').toLocaleDateString([], {month:'numeric', day:'numeric', year:'2-digit'});
+    let chg = '';
+    if(prev){
+      const c = changeBetween(prev, p);
+      if(!c.shared){
+        chg = ' <span class="n">no shared ground &mdash; nothing to compare</span>';
+      } else if(c.shared < 3){
+        chg = ' <span class="n">' + (c.med > 0 ? '+' : '') + c.med.toFixed(1) + ' ft over only '
+            + c.shared + ' segment' + (c.shared === 1 ? '' : 's') + ' &mdash; too little to call</span>';
+      } else {
+        /* A number smaller than the noise is reported as no provable change,
+           not as a change. */
+        const real = Math.abs(c.med) > nf.ft;
+        chg = real
+          ? ' <b style="color:' + (c.med < 0 ? '#B23A2B' : '#1B6F3B') + '">'
+            + (c.med > 0 ? '+' : '') + c.med.toFixed(1) + ' ft ' + (c.med < 0 ? 'shallower' : 'deeper')
+            + '</b> <span class="n">over ' + c.shared + ' segments</span>'
+          : ' <span class="n">' + (c.med > 0 ? '+' : '') + c.med.toFixed(1) + ' ft over '
+            + c.shared + ' segments &mdash; inside the noise</span>';
+      }
+    }
+    h += '<div class="t-row"><span>' + when + ' <span class="n">&times;' + p.n
+       + ' &middot; ' + p.bins.size + ' segment' + (p.bins.size === 1 ? '' : 's')
+       + (p.methods.length ? ' &middot; ' + p.methods.map(m => {
+            const mm = METHODS.find(x => x.id === m); return esc(mm ? mm.label.toLowerCase() : m); }).join('/') : '')
+       + '</span></span><span><b>' + p.med.toFixed(1) + ' ft</b>' + chg + '</span></div>';
+    prev = p;
+  }
+  h += '</div>';
+  if(t.kind !== 'mark') h += profileSVG(t, passes);
+  if(t.kind === 'circle'){
+    /* THE CLOSURE. A circle ends where it began, so the first and last
+       readings of one lap are over the same bottom and can only differ by
+       error. That number is worth more than any single depth on the trace:
+       it is the run telling you how much to trust itself. */
+    const laps = passes.map(p => {
+      const byT = p.pts.slice().sort((a,b) => a.t - b.t);
+      if(byT.length < 6) return null;
+      const k = Math.max(2, Math.round(byT.length*0.08));
+      const startMed = median(byT.slice(0,k).map(q => q.mllw));
+      const endMed   = median(byT.slice(-k).map(q => q.mllw));
+      const swept = Math.abs(byT[byT.length-1].station - byT[0].station);
+      return { day:p.day, gap:endMed - startMed, closed: swept > 300 || swept < 60 };
+    }).filter(Boolean);
+    if(laps.length){
+      h += '<div class="note"><b>Closure.</b> ' + laps.map(l =>
+        new Date(l.day + 'T12:00').toLocaleDateString([], {month:'numeric', day:'numeric'})
+        + ': ' + (l.closed
+            ? 'back to the start within <b>' + Math.abs(l.gap).toFixed(1) + ' ft</b>'
+            : '<span class="est">lap not closed — did not come all the way round</span>')).join(' &middot; ')
+        + '. A closed lap is over the same bottom at both ends, so whatever it disagrees with itself by is '
+        + 'drift, not bottom. That is the number to judge any change against.</div>';
+    }
+  }
+  h += '<div class="note"><b>Noise floor: ' + nf.ft.toFixed(1) + ' ft</b> &mdash; '
+    + (nf.src === 'measured'
+        ? 'measured from your own repeats here (' + nf.n + ' place'
+          + (nf.n === 1 ? '' : 's') + ' where the same piece of bottom was read more than once in a day, '
+          + 'when nothing can have moved).'
+        : 'assumed from the instrument, because nothing here has been read twice in one day yet. '
+          + 'Read it twice on one trip and this becomes a measurement instead of an assumption.')
+    + ' A change smaller than this is not a change you can prove.'
+    + (t.kind !== 'mark'
+        ? ' The <b>ft</b> column is the median of whatever ground that visit covered, so it moves when '
+          + 'coverage moves; the <b>change</b> beside it is paired segment by segment and is the one to read.'
+        : '')
+    + '</div>';
+  h += '<div class="foot">'
+    + '<button class="btn" data-arm="' + t.id + '">Arm this</button>'
+    + '<button class="btn" data-gather="' + t.id + '">Pull in nearby soundings</button>'
+    + '<button class="btn" data-radius="' + t.id + '">Radius ' + (t.rFt || DEFAULT_MARK_R) + ' ft</button>'
+    + '<button class="btn warn" data-del="' + t.id + '">Delete</button></div>';
+  el.innerHTML = h;
+  el.querySelectorAll('[data-arm]').forEach(b => b.addEventListener('click', () => {
+    armed = b.dataset.arm; targetsSave(); renderTargets(); renderStrip(); drawTargets(); }));
+  el.querySelectorAll('[data-gather]').forEach(b => b.addEventListener('click', () => {
+    const n = gatherInto(targetById(b.dataset.gather));
+    renderDetail(b.dataset.gather); renderTargets();
+    if(!n) note('lnDetail','warnbox','No untagged soundings within the radius.');
+  }));
+  el.querySelectorAll('[data-radius]').forEach(b => b.addEventListener('click', () => {
+    const t2 = targetById(b.dataset.radius);
+    const v = parseFloat(prompt('How close counts as being back on it, in feet?\n\n'
+      + 'Wider pulls in more readings but mixes in more bottom that is not the same bottom — '
+      + 'which is where a false change comes from.', t2.rFt || DEFAULT_MARK_R));
+    if(isFinite(v) && v > 2 && v < 500){ t2.rFt = Math.round(v); targetsSave(); renderDetail(t2.id); }
+  }));
+  el.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', () => {
+    const t2 = targetById(b.dataset.del);
+    if(!confirm('Delete "' + t2.name + '"? The soundings stay; they just stop being tagged to it.')) return;
+    for(const p of points) if(p.target === t2.id){ p.target = null; p.station = null; }
+    targets = targets.filter(x => x.id !== t2.id);
+    if(armed === t2.id) armed = null;
+    savePoints(); targetsSave(); renderTargets(); renderStrip(); drawTargets();
+    document.getElementById('lnDetail').innerHTML = '';
+  }));
+}
+
+function renderTargets(){
+  const el = document.getElementById('lnList');
+  const btn = document.getElementById('btnDrawLine');
+  btn.textContent = drawing ? 'Finish line' : 'Draw a line';
+  if(!targets.length){ el.innerHTML = ''; return; }
+  el.innerHTML = '<div class="tally">' + targets.map(t => {
+    const passes = passesOf(t);
+    const n = points.filter(p => p.target === t.id).length;
+    return '<div class="lnrow"><span class="lnname" data-open="' + t.id + '">'
+      + (t.id === armed ? '&#9679; ' : '') + esc(t.name)
+      + '<span class="lnmeta">' + (t.kind === 'mark' ? 'mark' : t.kind === 'circle' ? ('circle · ' + Math.round(t.rFt || DEFAULT_CIRCLE_R) + ' ft') : 'line')
+      + ' &middot; ' + passes.length + ' visit' + (passes.length === 1 ? '' : 's')
+      + ' &middot; ' + n.toLocaleString() + ' soundings</span></span>'
+      + '<span>' + (passes.length ? '<b>' + passes[passes.length-1].med.toFixed(1) + ' ft</b>' : '<span class="n">&mdash;</span>')
+      + '</span></div>';
+  }).join('') + '</div>';
+  el.querySelectorAll('[data-open]').forEach(b => b.addEventListener('click', () => renderDetail(b.dataset.open)));
+}
+
+function drawTargets(){
+  if(!map) return;
+  if(!targetLayer) targetLayer = L.layerGroup().addTo(map);
+  targetLayer.clearLayers();
+  for(const t of targets){
+    const on = t.id === armed;
+    if(t.kind === 'line'){
+      L.polyline(t.pts, { color:'#4a3aa7', weight: on ? 4 : 2, opacity: on ? .95 : .55,
+                          dashArray: on ? null : '6 5' }).addTo(targetLayer);
+    } else if(t.kind === 'circle'){
+      L.circle(t.pts[0], { radius:(t.rFt || DEFAULT_CIRCLE_R)/FT_PER_M, color:'#4a3aa7',
+                           weight: on ? 3 : 1.5, opacity: on ? .95 : .55, fill:false,
+                           dashArray: on ? null : '5 4' }).addTo(targetLayer);
+      L.circleMarker(t.pts[0], { radius:3, color:'#ffffff', weight:1.5,
+                                 fillColor:'#4a3aa7', fillOpacity:1 }).addTo(targetLayer);
+    } else {
+      L.circle(t.pts[0], { radius:(t.rFt || DEFAULT_MARK_R)/FT_PER_M, color:'#4a3aa7',
+                           weight: on ? 3 : 1.5, opacity: on ? .95 : .55,
+                           fillColor:'#4a3aa7', fillOpacity: on ? .18 : .07 }).addTo(targetLayer);
+    }
+    L.marker(t.pts[0], { icon: L.divIcon({ className:'here-pin',
+      html:'<div style="font:700 10px/1.2 monospace;color:#fff;background:#4a3aa7;padding:2px 5px;'
+         + 'border-radius:3px;white-space:nowrap;border:1.5px solid #fff">' + esc(t.name) + '</div>',
+      iconSize:null, iconAnchor:[0,-6] }), interactive:false }).addTo(targetLayer);
+  }
+}
+
+/* =====================================================================
    SPOTS — a name, a median and an honest spread
    ===================================================================== */
 function groupsByName(){
@@ -1579,13 +2201,15 @@ function pushToBoard(name, g){
    EXPORT
    ===================================================================== */
 function toCSV(){
-  const head = 'name,time_iso,lat,lng,method,reading_ft,offset_ft,depth_to_waterline_ft,tide_ft_mllw,depth_ft_mllw\n';
+  const head = 'name,time_iso,lat,lng,method,reading_ft,offset_ft,depth_to_waterline_ft,tide_ft_mllw,depth_ft_mllw,repeat_target,station\n';
   return head + points.map(p => [
     JSON.stringify(p.name || ''), new Date(p.t).toISOString(),
     p.lat.toFixed(6), p.lng.toFixed(6), p.method || '',
     p.ft.toFixed(2), (p.off || 0).toFixed(2), (p.ft + (p.off||0)).toFixed(2),
     p.tide == null ? '' : p.tide.toFixed(2),
-    p.mllw == null ? '' : p.mllw.toFixed(2)
+    p.mllw == null ? '' : p.mllw.toFixed(2),
+    JSON.stringify((targetById(p.target) || {}).name || ''),
+    p.station == null ? '' : p.station.toFixed(1)
   ].join(',')).join('\n') + '\n';
 }
 function download(name, text, type){
@@ -1639,6 +2263,7 @@ function renderFooter(){
 async function boot(){
   loadModel();
   loadPoints();
+  targetsLoad();
   const moved = migrateFromBoard();
   initMap();
   renderLegend();
@@ -1649,7 +2274,10 @@ async function boot(){
   renderManualRead();
   renderTally();
   renderPasses();
+  renderTargets();
+  renderStrip();
   drawPoints();
+  drawTargets();
   renderFooter();
   if(moved) note('importOut','okbox', '<b>' + moved + ' soundings brought over from the tide board.</b> '
     + 'Logging lives here now; the board keeps the tides.');
@@ -1727,7 +2355,7 @@ document.getElementById('btnHere').addEventListener('click', () => {
     p => {
       fix = { lat:p.coords.latitude, lng:p.coords.longitude, acc:p.coords.accuracy, at:Date.now() };
       btn.textContent = 'Find me'; btn.disabled = false;
-      renderGps(); renderRead(); drawHere();
+      renderGps(); renderRead(); drawHere(); renderStrip();
       map.setView([fix.lat, fix.lng], 16);
       startGps();
     },
@@ -1736,6 +2364,15 @@ document.getElementById('btnHere').addEventListener('click', () => {
       setTimeout(() => { btn.textContent = 'Find me'; }, 3000);
     },
     { enableHighAccuracy:true, timeout:20000, maximumAge:5000 });
+});
+document.getElementById('btnMarkHere').addEventListener('click', markHere);
+document.getElementById('btnCircleHere').addEventListener('click', circleHere);
+document.getElementById('btnDrawLine').addEventListener('click', () => {
+  if(drawing) finishDrawing(); else startDrawing();
+});
+document.getElementById('btnDisarm').addEventListener('click', () => {
+  if(drawing){ drawing = null; if(drawLayer) drawLayer.clearLayers(); }
+  armed = null; targetsSave(); renderTargets(); renderStrip(); drawTargets();
 });
 document.getElementById('btnCsv').addEventListener('click', async () => {
   if(!points.length) return;
