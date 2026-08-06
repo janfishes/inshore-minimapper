@@ -1,0 +1,1718 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Mini Mapper — depths you have actually seen</title>
+<meta name="description" content="Mini Mapper — a map of every depth you have measured yourself, reduced to MLLW, for the Halifax River, Ponce Inlet and Mosquito Lagoon.">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0E1F2E">
+<!-- Same one-switch decision as the tide board: standalone + apple-mobile-web-app-capable
+     are made for the PHONE, and the cost is that the macOS Dock copy has no address bar.
+     Open the site as an ordinary Safari tab from a bookmark when you want the URL. -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Mini Mapper">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 fill=%22%23295890%22/%3E%3Cline x1=%2216%22 y1=%220%22 x2=%2216%22 y2=%2221%22 stroke=%22%23FFFFFF%22 stroke-width=%221.6%22/%3E%3Cpath d=%22M12.6 21 h6.8 l-1.5 7 h-3.8 Z%22 fill=%22%23D15C22%22 stroke=%22%23FFFFFF%22 stroke-width=%221.2%22/%3E%3Cg stroke=%22%23FFFFFF%22 stroke-width=%221.4%22%3E%3Cline x1=%228%22 y1=%225%22 x2=%2213%22 y2=%225%22/%3E%3Cline x1=%228%22 y1=%2210%22 x2=%2213%22 y2=%2210%22/%3E%3Cline x1=%228%22 y1=%2215%22 x2=%2213%22 y2=%2215%22/%3E%3C/g%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" media="print" onload="this.media='all'"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;700&family=IBM+Plex+Mono:wght@400;500;700&display=swap">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root{
+    --paper:#FFFFFF;
+    --ink:#0E1F2E;
+    --ink-soft:#4A5A66;
+    --hair:#C4CBD1;
+    --card:#FFFFFF;
+    --depth:#0A5A78;
+    --depth-soft:#E4F2F8;
+    --danger:#B23A2B;
+    --stop-soft:#F7E5E1;
+    --go:#1B6F3B;      --go-soft:#E3F3E8;
+    --warn:#B87E00;    --warn-soft:#FDF3D9;
+    /* THE DEPTH RAMP. One hue, monotone lightness, shallow = dark.
+       Validated as an ordinal ramp on a light surface: single hue (20° spread),
+       every adjacent gap over the dL floor, and the deep end clears 2:1 against
+       white paper so the legend swatches survive on the card as well as on the
+       photo. Blue was the obvious first choice and is exactly wrong here — the
+       map under these dots is blue water, and WTF already learned what a blue
+       mark on blue water costs. Orange is the maximum-separation hue over both
+       water and marsh, and it runs the nautical way round: dark is shallow. */
+    --d0:#5e1a00;   /* under 1 ft — dries or all but */
+    --d1:#8a2b06;   /* 1–3 */
+    --d2:#b03f14;   /* 3–6 */
+    --d3:#d15c22;   /* 6–10 */
+    --d4:#e2823f;   /* 10–20 */
+    --d5:#eda368;   /* 20 ft and deeper */
+    --sans:'IBM Plex Sans Condensed','Avenir Next Condensed','Helvetica Neue',Arial,sans-serif;
+    --mono:'IBM Plex Mono',ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:var(--paper);color:var(--ink);font-family:var(--sans);min-height:100vh;
+    -webkit-text-size-adjust:100%;
+    background-image:repeating-linear-gradient(0deg,transparent,transparent 39px,rgba(21,42,59,.035) 39px,rgba(21,42,59,.035) 40px);
+  }
+  .wrap{max-width:680px;margin:0 auto;padding:16px 14px calc(60px + env(safe-area-inset-bottom))}
+  header{border-bottom:3px double var(--ink);padding-bottom:10px;margin-bottom:12px}
+  .chart-no{font-family:var(--mono);font-size:11px;letter-spacing:.14em;color:var(--ink-soft);text-transform:uppercase}
+  h1{font-size:26px;font-weight:700;line-height:1.1;margin-top:2px;display:flex;align-items:center;gap:.34em}
+  h1 .thin{font-weight:500;color:var(--ink-soft)}
+  h1>span{min-width:0}
+  .ticon{width:1.3em;height:1.3em;flex:0 0 auto;display:block}
+  .sub{font-family:var(--mono);font-size:11px;color:var(--ink-soft);margin-top:4px;line-height:1.5}
+
+  /* ---- the map is the headline, so it gets the room ---- */
+  .mapcard{border:1px solid var(--hair);border-radius:4px;overflow:hidden;margin-bottom:12px;background:var(--card)}
+  #map{width:100%;height:56vh;min-height:320px;background:#dfe6ea}
+  .maptools{
+    display:flex;flex-wrap:wrap;gap:6px;align-items:center;
+    padding:8px 10px;border-top:1px solid var(--hair);font-family:var(--mono);font-size:11px;
+  }
+  .tbtn{
+    font-family:var(--mono);font-size:10px;border:1px solid var(--ink);background:transparent;color:var(--ink);
+    padding:5px 8px;cursor:pointer;border-radius:2px;white-space:nowrap;letter-spacing:.04em;
+  }
+  .tbtn.on{background:var(--ink);color:var(--paper)}
+  .tbtn:disabled{opacity:.4;cursor:default}
+  .spacer{flex:1 1 auto}
+  .mapcount{color:var(--ink-soft);white-space:nowrap}
+
+  /* Legend. Present always — colour is the encoding, so it never ships bare,
+     and every dot also gives its number on tap. */
+  .legend{padding:8px 10px;border-top:1px solid var(--hair);font-family:var(--mono);font-size:10px}
+  .legend .lg-title{color:var(--ink-soft);letter-spacing:.08em;text-transform:uppercase;margin-bottom:5px}
+  .lg-row{display:flex;align-items:stretch;gap:0}
+  .lg-cell{flex:1;text-align:center}
+  .lg-sw{height:12px;border:1px solid rgba(255,255,255,.9);box-shadow:0 0 0 1px rgba(14,31,46,.25)}
+  .lg-lbl{margin-top:3px;color:var(--ink-soft);font-size:9px}
+  .lg-note{margin-top:6px;color:var(--ink-soft);line-height:1.5}
+
+  /* ---- cards ---- */
+  .card{background:var(--card);border:1px solid var(--hair);border-radius:4px;margin-bottom:12px;overflow:hidden}
+  details.card>summary{
+    padding:10px 12px;font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.1em;
+    text-transform:uppercase;cursor:pointer;list-style:none;display:block;
+  }
+  details.card>summary::-webkit-details-marker{display:none}
+  details.card>summary .hint{
+    display:block;margin-top:3px;font-weight:400;letter-spacing:.04em;text-transform:none;
+    color:var(--ink-soft);font-size:11px;
+  }
+  .body{padding:0 12px 12px;font-size:13px;line-height:1.55}
+  .note{font-size:11px;color:var(--ink-soft);line-height:1.6;margin-top:10px}
+  .note b{color:var(--ink)}
+
+  .gps{
+    font-family:var(--mono);font-size:12px;background:var(--depth-soft);border:1px solid var(--depth);
+    color:var(--depth);border-radius:3px;padding:8px 10px;margin-bottom:10px;line-height:1.5;
+  }
+  .gps .pos{font-size:14px;font-weight:700;white-space:nowrap;display:block}
+  .gps.stale{background:var(--stop-soft);border-color:var(--danger);color:var(--danger)}
+  .row{display:flex;align-items:center;gap:8px;margin-bottom:8px;font-family:var(--mono);font-size:12px}
+  .row label{flex:1}
+  .row input,.row select{
+    width:110px;font-family:var(--mono);font-size:16px;padding:8px;
+    border:1px solid var(--ink);border-radius:2px;background:var(--paper);color:var(--ink);text-align:right;
+  }
+  .row select{text-align:left}
+  .row input.wide{width:100%;text-align:left;font-size:14px}
+  .row input:disabled{background:#EDF2F6;color:var(--ink-soft);border-style:dashed}
+  .biglog{
+    width:100%;font-family:var(--mono);font-size:15px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+    padding:14px;border:1px solid var(--ink);background:var(--ink);color:var(--paper);border-radius:3px;cursor:pointer;
+  }
+  .biglog:disabled{background:transparent;color:var(--ink-soft);border-color:var(--hair);cursor:default}
+  .read{
+    font-family:var(--mono);font-size:12px;line-height:1.6;margin-top:10px;padding:8px 10px;
+    border-left:3px solid var(--hair);background:#F7F9FA;border-radius:0 3px 3px 0;
+  }
+  .read b{font-size:14px}
+  .est{color:var(--ink-soft)}
+  .foot{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+  .btn{
+    font-family:var(--mono);font-size:10px;border:1px solid var(--ink);background:transparent;color:var(--ink);
+    padding:7px 9px;cursor:pointer;border-radius:2px;letter-spacing:.04em;
+  }
+  .btn:disabled{opacity:.4;cursor:default}
+  .btn.warn{border-color:var(--danger);color:var(--danger)}
+
+  /* method picker — big targets, one hand, in the sun */
+  .methods{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+  .mbtn{
+    flex:1 1 auto;min-width:88px;font-family:var(--mono);font-size:11px;padding:9px 6px;
+    border:1px solid var(--ink);background:transparent;color:var(--ink);border-radius:3px;cursor:pointer;
+  }
+  .mbtn.on{background:var(--ink);color:var(--paper)}
+  .mbtn .off0{display:block;font-size:9px;letter-spacing:.04em;opacity:.75;margin-top:2px}
+
+  .tally{font-family:var(--mono);font-size:12px;margin-top:10px}
+  .t-row{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid var(--hair);align-items:baseline}
+  .t-row.head{color:var(--ink-soft);font-size:10px;letter-spacing:.08em;text-transform:uppercase;border-bottom-width:2px}
+  .t-row .n{color:var(--ink-soft);font-size:10px}
+  .t-name{cursor:pointer;text-decoration:underline dotted}
+  .warnbox{
+    border:1px solid var(--danger);background:var(--stop-soft);color:var(--danger);
+    border-radius:3px;padding:8px 10px;font-size:11px;line-height:1.55;margin-top:10px;
+  }
+  .okbox{
+    border:1px solid var(--go);background:var(--go-soft);color:var(--go);
+    border-radius:3px;padding:8px 10px;font-size:11px;line-height:1.55;margin-top:10px;
+  }
+  .filebtn{
+    display:block;width:100%;font-family:var(--mono);font-size:11px;border:1px dashed var(--ink);
+    background:transparent;color:var(--ink);padding:12px;cursor:pointer;border-radius:3px;text-align:center;
+  }
+  input[type=file]{display:none}
+  .passrow{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid var(--hair);
+    font-family:var(--mono);font-size:11px;align-items:baseline}
+  .leaflet-popup-content{font-family:var(--mono);font-size:11px;line-height:1.6}
+  .leaflet-popup-content b{font-size:13px}
+  .leaflet-container{font-family:var(--mono)}
+  footer{font-size:11px;color:var(--ink-soft);line-height:1.6;border-top:1px solid var(--hair);padding-top:10px;margin-top:6px}
+  footer b{color:var(--ink)}
+  a{color:var(--depth)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="chart-no">Volusia County · Halifax River · Ponce de Leon Inlet</div>
+  <h1>
+    <svg class="ticon" viewBox="0 0 32 32" aria-hidden="true">
+      <rect width="32" height="32" rx="4" fill="#295890"/>
+      <line x1="16" y1="0" x2="16" y2="21" stroke="#fff" stroke-width="1.6"/>
+      <path d="M12.6 21 h6.8 l-1.5 7 h-3.8 Z" fill="#D15C22" stroke="#fff" stroke-width="1.2"/>
+      <g stroke="#fff" stroke-width="1.4">
+        <line x1="8" y1="5" x2="13" y2="5"/><line x1="8" y1="10" x2="13" y2="10"/><line x1="8" y1="15" x2="13" y2="15"/>
+      </g>
+    </svg>
+    <span>Mini <span class="thin">Mapper</span></span>
+  </h1>
+  <div class="sub" id="headSub">Every depth you have measured yourself, reduced to MLLW.</div>
+</header>
+
+<div class="mapcard">
+  <div id="map"></div>
+  <div class="maptools">
+    <button class="tbtn on" id="btnPts">Soundings</button>
+    <button class="tbtn" id="btnSurvey">Survey lines</button>
+    <button class="tbtn" id="btnHere">Find me</button>
+    <span class="spacer"></span>
+    <span class="mapcount" id="mapCount">no soundings yet</span>
+  </div>
+  <div class="legend">
+    <div class="lg-title">Depth at MLLW &mdash; what a chart would print</div>
+    <div class="lg-row" id="legendRow"></div>
+    <div class="lg-note" id="legendNote"></div>
+  </div>
+</div>
+
+<details class="card" id="logBox" open>
+  <summary>Log a sounding <span class="hint">where you are standing, right now</span></summary>
+  <div class="body">
+    <div class="gps" id="gpsLine">GPS: waiting for a fix&hellip;</div>
+
+    <div class="methods" id="methodRow"></div>
+
+    <div class="row"><label for="fName">Spot name</label></div>
+    <div class="row"><input type="text" class="wide" id="fName" placeholder="e.g. Crook's Corner hole" autocomplete="off"></div>
+
+    <div class="row">
+      <label for="fDepth">Depth reading (ft)</label>
+      <input type="number" id="fDepth" step="0.1" min="0" max="200" inputmode="decimal">
+    </div>
+    <div class="row">
+      <label for="fOffset" id="fOffsetLbl">Transducer below waterline (ft)</label>
+      <input type="number" id="fOffset" step="0.1" min="-5" max="10" inputmode="decimal">
+    </div>
+
+    <button class="biglog" id="btnLog" disabled>Log this sounding</button>
+    <div class="read" id="readOut"></div>
+
+    <div class="foot">
+      <button class="btn" id="btnUndo">Undo last</button>
+      <button class="btn" id="btnManual">Type a position instead</button>
+    </div>
+
+    <div class="note" id="methodNote"></div>
+  </div>
+</details>
+
+<details class="card" id="manualBox">
+  <summary>Type a position <span class="hint">for a reading taken away from the phone</span></summary>
+  <div class="body">
+    <p>A depth is only worth keeping if you know where it was. Enter the position the way your
+       plotter shows it &mdash; degrees and decimal minutes &mdash; and the time you took it.</p>
+    <div class="row">
+      <label for="mLat">Latitude N &nbsp;<span class="est">29&deg; 02.580'</span></label>
+      <input type="text" id="mLat" placeholder="29 02.580" inputmode="decimal">
+    </div>
+    <div class="row">
+      <label for="mLng">Longitude W &nbsp;<span class="est">80&deg; 57.589'</span></label>
+      <input type="text" id="mLng" placeholder="80 57.589" inputmode="decimal">
+    </div>
+    <div class="row">
+      <label for="mWhen">When (blank = now)</label>
+      <input type="datetime-local" id="mWhen" class="wide">
+    </div>
+    <div class="row">
+      <label for="mDepth">Depth reading (ft)</label>
+      <input type="number" id="mDepth" step="0.1" min="0" max="200" inputmode="decimal">
+    </div>
+    <button class="biglog" id="btnManualLog">Add this sounding</button>
+    <div class="read" id="manualRead"></div>
+    <div class="note">
+      Uses the same method and offset picked above. <b>The time matters as much as the depth</b> &mdash;
+      a reading is reduced against the tide at that minute, and four hours out is the whole swing.
+    </div>
+  </div>
+</details>
+
+<details class="card" id="importBox">
+  <summary>Import a track or a file <span class="hint">GPX off the plotter card, or a CSV</span></summary>
+  <div class="body">
+    <label class="filebtn" for="fileIn">Choose a .GPX or .CSV file&hellip;</label>
+    <input type="file" id="fileIn" accept=".gpx,.GPX,.csv,.CSV,.txt" multiple>
+    <div id="importOut"></div>
+    <div id="passList"></div>
+    <div class="note">
+      <b>The ACTIVE LOG is the one worth exporting.</b> On the ECHOMAP, saving a track throws away the
+      timestamps and the depths and keeps only the shape &mdash; every usable sounding lives in
+      <b>ACTIVE LOG</b>, and that is a rolling buffer, so export before it wraps.
+      <br><br>
+      <b>Garmin writes metres even when the screen says feet.</b> The gpxx schema defines depth in metres and
+      the unit converts on the way out. This converts once, and says so on every import &mdash; if a number
+      looks four times too shallow, that is the trap you are looking at.
+    </div>
+  </div>
+</details>
+
+<details class="card" id="spotsBox" open>
+  <summary>Spots <span class="hint">what each one really holds at dead low</span></summary>
+  <div class="body">
+    <div id="spotTally"></div>
+    <div class="note">
+      A spread over 3 ft is not one depth &mdash; it is a slope, and no single number describes it.
+      Either the pass crossed the edge of a hole or a bar, or a reading was taken off bottom.
+    </div>
+  </div>
+</details>
+
+<details class="card" id="dataBox">
+  <summary>Export &amp; housekeeping <span class="hint">CSV out, and where this lives</span></summary>
+  <div class="body">
+    <div class="foot">
+      <button class="btn" id="btnCsv">Copy CSV</button>
+      <button class="btn" id="btnJson">Download backup</button>
+      <button class="btn" id="btnReduce">Re-reduce everything</button>
+      <button class="btn warn" id="btnClear">Clear all soundings</button>
+    </div>
+    <div id="dataOut"></div>
+    <div class="note">
+      Soundings are kept <b>on this device</b> and nowhere else. Take the CSV or the backup off it
+      now and then &mdash; a cleared browser takes the lot.
+      <b>Re-reduce</b> is worth running after you calibrate a lag on the tide board: every sounding
+      already taken improves, because what is stored is the raw reading and the minute, not just the answer.
+    </div>
+  </div>
+</details>
+
+<footer id="footNote"></footer>
+
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+/* =====================================================================
+   MINI MAPPER
+   A map of the depths Jan has actually measured, reduced to MLLW so that
+   readings taken on different tides are comparable with each other and
+   with the NOAA survey.
+
+   WHY IT IS ITS OWN APP.  81% of the BlueTopo cells under this water are
+   interpolated fill rather than measurement, and where green lidar could
+   not see into tannic water it filled a deep hole in off the bar beside
+   it. Crook's Corner is the proof: the survey puts the bottom there at
+   about 1.5 ft, the hole holds 8-10, and there is no measurement within
+   170 m to have got it right. No amount of interpolation fixes that. A
+   sounding does — and a sounding is only worth anything if it is reduced.
+
+     depth at MLLW = reading + (transducer below waterline) - tide then
+
+   The tide is THIS POSITION'S own: the inlet prediction shifted by the lag
+   here and scaled by the height model here, at the minute of the reading.
+   Two readings on the same hole four hours apart therefore land on the
+   same number, which is the whole test of whether any of this works.
+   ===================================================================== */
+
+const BUILD_NUM   = 1;
+const BUILD_STAMP = "2026-08-06";
+
+/* ---------------------------------------------------------------------
+   STORAGE
+
+   The tide board lives at /tideboard/ on the same origin as this app, so
+   the two share a localStorage area. That is deliberate and it is the
+   reason this app has no calibration screen of its own: the lags Jan
+   times on the water, the positions he corrects and the spots he adds all
+   belong to the board, and this app READS them. It writes back exactly
+   one key — tide-sounded — which is how a median here becomes the depth
+   the board prints.
+
+   If the two are ever served from different origins the sharing quietly
+   stops. Nothing breaks: the baked built-ins below take over and the
+   footer says which is in force.
+   --------------------------------------------------------------------- */
+const LS = {
+  pts:'mm-points', off:'mm-offset', method:'mm-method', draft:'mm-draft',
+  passes:'mm-passes', seen:'mm-migrated',
+  // the tide board's keys, shared by origin
+  tbLags:'tide-lags', tbPos:'tide-positions', tbAdded:'tide-added-spots',
+  tbSounded:'tide-sounded', tbSurvey:'tide-survey', tbOffset:'tide-survey-offset'
+};
+function lsGet(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
+function lsSet(k,v){ try{ localStorage.setItem(k,v); return true; }catch(e){ return false; } }
+function lsJSON(k,dflt){ try{ const r = lsGet(k); return r ? JSON.parse(r) : dflt; }catch(e){ return dflt; } }
+
+/* ---------------------------------------------------------------------
+   THE TIDE MODEL — copied from the tide board, and the copy is the point
+   of care.
+
+   BUILTIN_LOCATIONS below is a COPY of the board's table. It is copied
+   rather than fetched because these five cards change about once a month
+   while Jan's calibrations change every time he watches a turn — and the
+   calibrations are the half that comes across live, out of shared
+   storage. When a card is added to the board's built-ins, or a measured
+   lag changes there, copy it here too: the two must agree or the same
+   sounding reduces differently in the two apps.
+   --------------------------------------------------------------------- */
+const INLET = { lat: 29.077867, lng: -80.908517 };
+const STATIONS = [
+  { id:"8721138", label:"Halifax River, Ponce Inlet" },
+  { id:"8721147", label:"Ponce De Leon Inlet South" }
+];
+const BUILTIN_LOCATIONS = [
+  { key:"inlet",     name:"Ponce Inlet (reference)", lat:29.077867, lng:-80.908517, hi:0,   lo:0,
+    hs:1, ho:0, ls:1, lo_:0, measured:true },
+  { key:"threebr",   name:"Three Bridges",           lat:29.086350, lng:-80.968633, hi:75,  lo:90,  est:true },
+  { key:"trestle",   name:"Spruce Creek Trestle",    lat:29.080050, lng:-80.983283, hi:105, lo:120, est:true },
+  { key:"tbtrestle", name:"Turnbull Bay Trestle",    lat:29.050700, lng:-80.959650, hi:110, lo:130, est:true },
+  { key:"turnbull",  name:"Crook's Corner",          lat:29.043000, lng:-80.959817, hi:120, lo:140, est:true, soundedFt:8 },
+  /* The two MEASURED anchors. estimateScale() interpolates between these and
+     the inlet and nothing else — interpolating off an estimate would only be
+     compounding a guess. */
+  { key:"fairway",   name:"DJM",                     lat:29.032633, lng:-80.946983, hi:149, lo:188, measured:true,
+    hs:0.59, ho:-0.04, ls:0.59, lo_:-0.04 },
+  { key:"dunlawton", name:"Dunlawton Bridge",        lat:29.148333, lng:-80.975317, hi:90,  lo:105, measured:true,
+    hs:0.536, ho:-0.280, ls:0.536, lo_:-0.280 }
+];
+
+let LOCATIONS = [], offsets = {}, sharedOK = false;
+
+function loadModel(){
+  LOCATIONS = BUILTIN_LOCATIONS.map(l => Object.assign({}, l));
+  const added = lsJSON(LS.tbAdded, []);
+  if(Array.isArray(added) && added.length){
+    sharedOK = true;
+    for(const s of added) LOCATIONS.push(Object.assign({ est:true, added:true }, s));
+  }
+  for(const loc of LOCATIONS) offsets[loc.key] = { hi:loc.hi, lo:loc.lo };
+  const lags = lsJSON(LS.tbLags, null);
+  if(lags){ sharedOK = true; Object.assign(offsets, lags); }
+  const pos = lsJSON(LS.tbPos, null);
+  if(pos){
+    sharedOK = true;
+    for(const loc of LOCATIONS){
+      const p = pos[loc.key];
+      if(p && isFinite(p.lat) && isFinite(p.lng)){ loc.lat = p.lat; loc.lng = p.lng; }
+    }
+  }
+}
+
+const NM_PER_DEG = 60;
+function distNm(a,b){
+  const dx = (a.lng - b.lng)*Math.cos((a.lat + b.lat)/2*Math.PI/180), dy = a.lat - b.lat;
+  return Math.sqrt(dx*dx + dy*dy)*NM_PER_DEG;
+}
+
+/* Lag at an arbitrary position, on the curve through every located card.
+   Identical to the board's estimateLag() — including its known weakness:
+   it interpolates on straight-line distance from the inlet, which breaks
+   across branches (Turnbull Bay spots come out with inlet-side numbers).
+   Where that matters the board's own cards carry hand-set lags, and
+   surveyModel() prefers a card within 200 yd for exactly this reason. */
+function estimateLag(lat,lng){
+  const anchors = LOCATIONS
+    .filter(l => isFinite(l.lat) && isFinite(l.lng))
+    .map(l => ({ dd: distNm({lat:l.lat,lng:l.lng}, INLET), hi: offsets[l.key].hi, lo: offsets[l.key].lo }))
+    .sort((a,b) => a.dd - b.dd);
+  const d = distNm({lat,lng}, INLET);
+  if(!anchors.length) return { hi:60, lo:75 };
+  if(d <= anchors[0].dd) return { hi:Math.round(anchors[0].hi), lo:Math.round(anchors[0].lo) };
+  for(let i = 0; i < anchors.length - 1; i++){
+    const a = anchors[i], b = anchors[i+1];
+    if(d >= a.dd && d <= b.dd){
+      const f = (b.dd - a.dd) > 0 ? (d - a.dd)/(b.dd - a.dd) : 0;
+      return { hi: Math.round(a.hi + (b.hi - a.hi)*f), lo: Math.round(a.lo + (b.lo - a.lo)*f) };
+    }
+  }
+  const last = anchors[anchors.length-1], prev = anchors[anchors.length-2] || anchors[0];
+  const span = (last.dd - prev.dd) || 1;
+  const f = (d - last.dd)/span;
+  return { hi: Math.round(last.hi + (last.hi - prev.hi)*f), lo: Math.round(last.lo + (last.lo - prev.lo)*f) };
+}
+
+/* Height scaling. The board refuses to guess this for a CARD, and is right
+   to — an uncalibrated card keeps the inlet's heights and says so, rather
+   than being silently damped by a guess. That refusal is wrong for a
+   sounding: reducing a reading taken 3 nm upriver with the inlet's 2.7 ft
+   swing puts about a foot of pure error into it. So this DOES interpolate,
+   between the MEASURED anchors only, and every number it touches is est. */
+function estimateScale(lat,lng){
+  const anchors = LOCATIONS
+    .filter(l => l.measured && isFinite(l.hs) && isFinite(l.lat))
+    .map(l => ({ dd: distNm({lat:l.lat,lng:l.lng}, INLET), hs:l.hs, ho:l.ho, ls:l.ls, lo_:l.lo_ }))
+    .sort((a,b) => a.dd - b.dd);
+  if(!anchors.length) return { hs:1, ho:0, ls:1, lo_:0 };
+  const d = distNm({lat,lng}, INLET);
+  const mix = (a,b,f) => ({ hs:a.hs+(b.hs-a.hs)*f, ho:a.ho+(b.ho-a.ho)*f,
+                            ls:a.ls+(b.ls-a.ls)*f, lo_:a.lo_+(b.lo_-a.lo_)*f });
+  if(d <= anchors[0].dd) return anchors[0];
+  for(let i = 0; i < anchors.length-1; i++){
+    const a = anchors[i], b = anchors[i+1];
+    if(d >= a.dd && d <= b.dd){
+      const span = b.dd - a.dd;
+      return mix(a, b, span > 0 ? (d-a.dd)/span : 0);
+    }
+  }
+  /* Past the furthest anchor the scale is still falling, but extrapolating a
+     ratio runs it to zero and then negative. Hold the last measured value. */
+  return anchors[anchors.length-1];
+}
+
+/* A CARD within 200 yd wins: it may carry a lag Jan calibrated against a
+   real turn, which beats anything interpolated. */
+function surveyModel(lat,lng){
+  let near = null, nd = Infinity;
+  for(const l of LOCATIONS){
+    if(!isFinite(l.lat)) continue;
+    const d = distNm({lat,lng}, {lat:l.lat,lng:l.lng})*2025.37;   // yards
+    if(d < nd){ nd = d; near = l; }
+  }
+  if(near && nd <= 200){
+    const o = offsets[near.key];
+    const measured = !!(near.measured && isFinite(near.hs));
+    return { hi:o.hi, lo:o.lo, sc: measured ? near : estimateScale(lat,lng),
+             measured, from: near.name, nearYd: nd };
+  }
+  const lag = estimateLag(lat,lng);
+  return { hi:lag.hi, lo:lag.lo, sc: estimateScale(lat,lng), measured:false, from:null, nearYd: nd };
+}
+
+/* ---------------------------------------------------------------------
+   NOAA PREDICTIONS
+
+   The board only ever needs today and the week ahead. This app has to
+   reduce a track recorded in April, so predictions are fetched BY RANGE
+   and kept — the same thing reduce_soundings.py does on the Mac, with the
+   same cache-per-month shape so a second import of the same season costs
+   no network at all.
+   --------------------------------------------------------------------- */
+const PRED_CACHE = 'mm-preds-';        // + YYYYMM
+let preds = [];                        // the live window, for logging now
+let stationUsed = null;
+
+function ymd(d){
+  return d.getFullYear() + String(d.getMonth()+1).padStart(2,"0") + String(d.getDate()).padStart(2,"0");
+}
+function parseNOAA(s){
+  const [d,t] = s.split(" ");
+  const [Y,M,D] = d.split("-").map(Number);
+  const [h,m]   = t.split(":").map(Number);
+  return new Date(Y, M-1, D, h, m);
+}
+async function fetchRange(begin, end){
+  let lastErr = null;
+  for(const st of STATIONS){
+    const url = "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter"
+      + "?product=predictions&application=mini_mapper"
+      + "&begin_date=" + ymd(begin) + "&end_date=" + ymd(end)
+      + "&datum=MLLW&station=" + st.id
+      + "&time_zone=lst_ldt&units=english&interval=hilo&format=json";
+    try{
+      const res  = await fetch(url);
+      const data = await res.json();
+      if(data.predictions && data.predictions.length){
+        stationUsed = st;
+        return data.predictions.map(p => ({ time:parseNOAA(p.t), ft:parseFloat(p.v), type:p.type }));
+      }
+      lastErr = (data.error && data.error.message) || "No predictions returned";
+    }catch(e){ lastErr = e.message; }
+  }
+  throw new Error(lastErr || "Could not reach NOAA");
+}
+
+/* Predictions for a whole calendar month, cached. Stored as
+   "minutes-since-month-start,height*100,1|0;..." — the board's fallback
+   format, which is about a tenth the size of the JSON. */
+const monthKey = d => d.getFullYear() + String(d.getMonth()+1).padStart(2,"0");
+function packPreds(list, base){
+  return list.map(p => Math.round((p.time - base)/60000) + "," + Math.round(p.ft*100) + "," + (p.type === "H" ? 1 : 0)).join(";");
+}
+function unpackPreds(s, base){
+  if(!s) return [];
+  return s.split(";").map(r => {
+    const a = r.split(",");
+    return { time:new Date(base.getTime() + parseInt(a[0],10)*60000), ft:parseInt(a[1],10)/100, type:a[2] === "1" ? "H" : "L" };
+  });
+}
+async function predsForMonth(y, m){          // m is 0-based
+  const base = new Date(y, m, 1, 0, 0);
+  const key  = PRED_CACHE + monthKey(base);
+  const hit  = lsGet(key);
+  if(hit) return unpackPreds(hit, base);
+  /* A day either side so the cosine at a month boundary has both brackets. */
+  const b = new Date(y, m, 1); b.setDate(b.getDate()-1);
+  const e = new Date(y, m+1, 1); e.setDate(e.getDate()+1);
+  const list = await fetchRange(b, e);
+  lsSet(key, packPreds(list, base));
+  return list;
+}
+/* Every prediction needed to cover a set of instants, month by month. */
+async function predsCovering(times){
+  const months = new Map();
+  for(const t of times){
+    const d = new Date(t);
+    months.set(d.getFullYear()+"-"+d.getMonth(), [d.getFullYear(), d.getMonth()]);
+  }
+  let all = [];
+  for(const [y,m] of months.values()){
+    try{ all = all.concat(await predsForMonth(y,m)); }catch(e){}
+  }
+  const seen = new Set(), out = [];
+  for(const p of all.sort((a,b) => a.time - b.time)){
+    const k = +p.time;
+    if(seen.has(k)) continue;
+    seen.add(k); out.push(p);
+  }
+  return out;
+}
+
+/* Height and rate at an instant, from the cosine between the bracketing
+   high and low — the classic tide shape, identical to the board's. */
+function tideAt(events, t){
+  for(let i = 0; i < events.length - 1; i++){
+    const a = events[i], b = events[i+1];
+    if(t >= a.time && t <= b.time){
+      const span = b.time - a.time;
+      if(span <= 0) return null;
+      const f = (t - a.time)/span;
+      return { ft: a.ft + (b.ft - a.ft)*(1 - Math.cos(Math.PI*f))/2 };
+    }
+  }
+  return null;
+}
+/* Tide height above MLLW at an arbitrary position and instant. */
+function tideAtPos(lat, lng, t, events){
+  const ev0 = events || preds;
+  if(!ev0.length) return null;
+  const m = surveyModel(lat,lng);
+  const ev = ev0.map(p => {
+    const isH = p.type === "H";
+    return { time: new Date(p.time.getTime() + (isH ? m.hi : m.lo)*60000),
+             ft: isH ? m.sc.hs*p.ft + m.sc.ho : m.sc.ls*p.ft + m.sc.lo_, type: p.type };
+  }).sort((a,b) => a.time - b.time);
+  const at = tideAt(ev, t);
+  return at ? { ft: at.ft, model: m } : null;
+}
+
+/* ---------------------------------------------------------------------
+   THE SURVEY, for comparison only — the same contour blocks WTF draws and
+   the board reads, on the SAME datum (MLLW since WTF v458). Any tool that
+   reads these must be re-checked when the blocks are re-cut; there is no
+   2.25 ft conversion here and there must never be one again.
+   --------------------------------------------------------------------- */
+const DEPTH_DATA_V = 6;
+const DEPTH_DIR = 'depth/';
+const DEPTH_BLOCKS = [
+  ['c3_4',-81.2,29,-81,29.25],     ['c3_5',-81.2,29.25,-81,29.48],
+  ['c4_2',-81,28.5,-80.75,28.75],  ['c4_3',-81,28.75,-80.75,29],
+  ['c4_4',-81,29,-80.75,29.25],    ['c4_5',-81,29.25,-80.75,29.48]
+];
+const depthBlocks = new Map();
+async function cacheFirst(url){
+  try{
+    const c = await caches.open('minimapper-data-v1');
+    const hit = await c.match(url);
+    if(hit) return hit;
+    const res = await fetch(url);
+    if(res && res.ok) c.put(url, res.clone());
+    return res;
+  }catch(e){ return fetch(url); }
+}
+function depthDecode(raw){
+  const w = raw.b[0], s = raw.b[1], q = raw.q, out = [];
+  for(const L of raw.L){
+    const n = (L.length - 2) >> 1;
+    if(n < 2) continue;
+    const pts = new Float64Array(n*2);
+    let x = L[2], y = L[3], minx = x, maxx = x, miny = y, maxy = y;
+    pts[0] = w + x/q; pts[1] = s + y/q;
+    for(let i = 1; i < n; i++){
+      x += L[2 + i*2]; y += L[3 + i*2];
+      if(x < minx) minx = x; else if(x > maxx) maxx = x;
+      if(y < miny) miny = y; else if(y > maxy) maxy = y;
+      pts[i*2] = w + x/q; pts[i*2+1] = s + y/q;
+    }
+    out.push({ lv:L[0], pts:pts, bb:[w + minx/q, s + miny/q, w + maxx/q, s + maxy/q] });
+  }
+  return { lines: out };
+}
+function blockFor(lat,lng){
+  for(const [k,w,s,e,n] of DEPTH_BLOCKS){
+    if(lng >= w && lng <= e && lat >= s && lat <= n) return k;
+  }
+  return null;
+}
+function depthLoadBlock(key){
+  if(depthBlocks.has(key)) return Promise.resolve();
+  depthBlocks.set(key,'loading');
+  return cacheFirst(DEPTH_DIR + key + '.json?v=' + DEPTH_DATA_V)
+    .then(r => (r && r.ok) ? r.json() : null)
+    .then(j => { depthBlocks.set(key, j ? depthDecode(j) : null); })
+    .catch(() => { depthBlocks.set(key, null); });
+}
+function segDist2(px,py,ax,ay,bx,by,kx){
+  const dx = (bx-ax)*kx, dy = by-ay;
+  const wx = (px-ax)*kx, wy = py-ay;
+  const len2 = dx*dx + dy*dy;
+  let t = len2 > 0 ? (wx*dx + wy*dy)/len2 : 0;
+  t = t < 0 ? 0 : (t > 1 ? 1 : t);
+  const ex = wx - t*dx, ey = wy - t*dy;
+  return ex*ex + ey*ey;
+}
+const DEPTH_SEARCH_DEG = 0.012;
+function depthAtPoint(lat,lng){
+  const key = blockFor(lat,lng);
+  if(!key) return null;
+  const blk = depthBlocks.get(key);
+  if(!blk || blk === 'loading') return null;
+  const kx = Math.cos(lat*Math.PI/180), R = DEPTH_SEARCH_DEG;
+  const best = new Map();
+  for(const ln of blk.lines){
+    const bb = ln.bb;
+    if(lng < bb[0]-R || lng > bb[2]+R || lat < bb[1]-R || lat > bb[3]+R) continue;
+    let d2 = Infinity;
+    const p = ln.pts, n = p.length/2;
+    for(let i = 0; i < n-1; i++){
+      const s = segDist2(lng,lat, p[i*2],p[i*2+1], p[i*2+2],p[i*2+3], kx);
+      if(s < d2) d2 = s;
+    }
+    const d = Math.sqrt(d2);
+    if(d > R) continue;
+    const cur = best.get(ln.lv);
+    if(cur === undefined || d < cur) best.set(ln.lv, d);
+  }
+  if(!best.size) return null;
+  const rank = [...best.entries()].sort((a,b) => a[1] - b[1]);
+  const nearM = rank[0][1]*111000;
+  if(rank.length === 1) return { ft: rank[0][0], single:true, nearM };
+  const [lvA,dA] = rank[0], [lvB,dB] = rank[1];
+  const tot = dA + dB;
+  return { ft: tot > 0 ? lvA + (lvB - lvA)*(dA/tot) : lvA, single:false, nearM };
+}
+
+/* ---------------------------------------------------------------------
+   HOW THE READING WAS TAKEN
+
+   The offset is the number that bites, because it is systematic and
+   invisible: 15 minutes of clock error costs about 0.15 ft at Crook's
+   Corner, but a transducer offset typed wrong is wrong in every reading
+   forever. So the METHOD carries its own offset rather than leaving it to
+   memory — and the two hand methods are the accurate ones precisely
+   because they read from the surface and their offset is a certain zero.
+   --------------------------------------------------------------------- */
+const METHODS = [
+  { id:'tape',   label:'Tape measure', off:0,    fixed:true,
+    note:'A tape or a marked rod reads from the waterline down, so there is no offset to get wrong — and that is why a tape beats better electronics for calibrating a spot. Weight the end, let it hang slack-free, and read it at the surface.' },
+  { id:'lead',   label:'Lead line',    off:0,    fixed:true,
+    note:'Same as a tape: it reads from the surface, so the offset is zero. Let it touch bottom and take the reading with the line up-and-down, not streaming — a line dragged at an angle reads deeper than the water is.' },
+  { id:'sonar',  label:'Castable sonar', off:0,  fixed:true,
+    note:'A castable float sits ON the surface, so its offset is zero too. That is the whole reason it beats borrowing a boat with better electronics.' },
+  { id:'sounder',label:'Boat sounder', off:null, fixed:false,
+    note:'Enter the depth exactly as the instrument reads it, then say how far the transducer sits below the waterline; that gets added back. If the unit already carries a transducer offset in its own settings — Jan’s 74sv carries +1.0 ft — then it is ALREADY reading to the waterline and the offset here is 0. Keel draft is not part of this: that is clearance, not depth.' }
+];
+let method = lsGet(LS.method) || 'tape';
+if(!METHODS.some(m => m.id === method)) method = 'tape';
+
+/* ---------------------------------------------------------------------
+   THE SOUNDINGS THEMSELVES
+   Stored compactly — a 5,000-point track written as objects is most of a
+   localStorage quota. Raw reading and minute are what is kept; the
+   reduced number is derived and can always be recomputed, which is what
+   makes a later calibration improve every sounding already taken.
+   --------------------------------------------------------------------- */
+let points = [];     // {t,lat,lng,ft(raw reading),off,method,name,pass,mllw,tide}
+let passes = [];     // {id,label,when,n,src}
+
+function ptPack(p){
+  return [Math.round(p.t/1000), +p.lat.toFixed(6), +p.lng.toFixed(6), +p.ft.toFixed(2),
+          +(p.off||0).toFixed(2), p.method || 'sounder', p.name || '', p.pass || '',
+          p.mllw == null ? null : +p.mllw.toFixed(2), p.tide == null ? null : +p.tide.toFixed(2)];
+}
+function ptUnpack(a){
+  return { t:a[0]*1000, lat:a[1], lng:a[2], ft:a[3], off:a[4], method:a[5],
+           name:a[6], pass:a[7], mllw:a[8], tide:a[9] };
+}
+function savePoints(){
+  const ok = lsSet(LS.pts, JSON.stringify(points.map(ptPack)));
+  lsSet(LS.passes, JSON.stringify(passes));
+  if(!ok) note('dataOut', 'warnbox',
+    '<b>This device would not store that.</b> The browser’s storage for this app is full. '
+    + 'Copy the CSV and clear some passes before logging more, or nothing new is being kept.');
+  return ok;
+}
+function loadPoints(){
+  const raw = lsJSON(LS.pts, []);
+  points = Array.isArray(raw) ? raw.map(ptUnpack) : [];
+  passes = lsJSON(LS.passes, []) || [];
+}
+
+/* One-time adoption of anything logged in the tide board's Survey panel
+   before it moved here. Same origin, same idea, different key — and the
+   board's copy is left alone rather than deleted, so an older build of
+   the board still shows what it always showed. */
+function migrateFromBoard(){
+  if(lsGet(LS.seen)) return 0;
+  lsSet(LS.seen, '1');
+  const old = lsJSON(LS.tbSurvey, []);
+  if(!Array.isArray(old) || !old.length) return 0;
+  let n = 0;
+  for(const o of old){
+    if(!isFinite(o.lat) || !isFinite(o.lng) || !isFinite(o.reading)) continue;
+    points.push({ t:o.t, lat:o.lat, lng:o.lng, ft:o.reading, off:isFinite(o.offset) ? o.offset : 0,
+                  method:'sounder', name:o.name || '', pass:'board', mllw:null, tide:null });
+    n++;
+  }
+  if(n){
+    passes.push({ id:'board', label:'Logged on the tide board', when:Date.now(), n, src:'migrate' });
+    savePoints();
+  }
+  return n;
+}
+
+/* Reduce one point. Kept apart from logging so a stored point can be
+   re-reduced later against a better lag. */
+function reduce(p, events){
+  const toWater = p.ft + (isFinite(p.off) ? p.off : 0);
+  const tp = tideAtPos(p.lat, p.lng, new Date(p.t), events);
+  if(!tp) return { toWater, tide:null, mllw:null, model:null };
+  return { toWater, tide:tp.ft, mllw: toWater - tp.ft, model:tp.model };
+}
+async function reduceAll(list){
+  const todo = (list || points).filter(p => p.mllw == null);
+  if(!todo.length) return 0;
+  const ev = await predsCovering(todo.map(p => p.t));
+  let n = 0;
+  for(const p of todo){
+    const r = reduce(p, ev);
+    if(r.mllw != null){ p.mllw = r.mllw; p.tide = r.tide; n++; }
+  }
+  savePoints();
+  return n;
+}
+
+/* ---------------------------------------------------------------------
+   COLOUR — the depth ramp, and the one status colour beside it.
+   Sequential encoding gets ONE hue and a monotone lightness run; the
+   draft warning is a separate channel (a red ring) because "will I hit
+   this" is a state, not a magnitude, and the two must not be read off the
+   same swatch. Every dot also gives its number on tap, so nothing here
+   depends on colour alone.
+   --------------------------------------------------------------------- */
+const BINS = [
+  { max:1,        css:'#5e1a00', label:'<1' },
+  { max:3,        css:'#8a2b06', label:'1–3' },
+  { max:6,        css:'#b03f14', label:'3–6' },
+  { max:10,       css:'#d15c22', label:'6–10' },
+  { max:20,       css:'#e2823f', label:'10–20' },
+  { max:Infinity, css:'#eda368', label:'20+' }
+];
+const DRAFT_RED = '#d03b3b';
+let draftFt = parseFloat(lsGet(LS.draft));
+if(!(draftFt >= 0 && draftFt < 20)) draftFt = 1.5;
+const binFor = ft => BINS.find(b => ft < b.max) || BINS[BINS.length-1];
+
+/* =====================================================================
+   MAP
+   ===================================================================== */
+let map, ptLayer, surveyLayer, hereMarker, showPts = true, showSurvey = false;
+
+/* USGS ImageryTopo: the same imagery WTF draws, so a spot looks the way it
+   looks in the other app. NOTE the tile order — ArcGIS serves {z}/{y}/{x},
+   not Leaflet's default {z}/{x}/{y}. The cache ends at z16, so anything
+   closer is an overzoom of the z16 tile rather than a missing tile. */
+const TOPO_URL = 'https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryTopo/MapServer/tile/{z}/{y}/{x}';
+
+function initMap(){
+  map = L.map('map', { preferCanvas:true, zoomControl:true, attributionControl:true })
+         .setView([INLET.lat, INLET.lng], 13);
+  L.tileLayer(TOPO_URL, {
+    maxZoom:19, maxNativeZoom:16, minZoom:8,
+    attribution:'Imagery &copy; USGS National Map · depths measured by hand'
+  }).addTo(map);
+  surveyLayer = L.layerGroup();
+  ptLayer = L.layerGroup().addTo(map);
+  map.on('zoomend', drawPoints);
+  /* The contours are cut per view rather than all at once — the six blocks
+     together are a megabyte of lines and drawing the lot would stall the
+     map. Only redrawn while they are actually switched on. */
+  map.on('moveend', () => { if(showSurvey) drawSurvey(); });
+}
+
+/* 5,000 dots is a lot of canvas at wide zoom, and at z12 they land on top
+   of each other anyway — so wide views draw one dot per cell of a grid and
+   say so, and close views draw everything. The dot kept for a cell is the
+   SHALLOWEST in it, because on a chart the shallow reading is the one that
+   matters and averaging a hole with the bar beside it hides both. */
+function gridStepDeg(z){
+  if(z >= 16) return 0;
+  if(z >= 15) return 0.00012;
+  if(z >= 14) return 0.00025;
+  if(z >= 13) return 0.0005;
+  if(z >= 12) return 0.001;
+  return 0.002;
+}
+function decimate(list, z){
+  const step = gridStepDeg(z);
+  if(!step) return { pts:list, dropped:0 };
+  const cell = new Map();
+  for(const p of list){
+    const k = Math.round(p.lat/step) + ':' + Math.round(p.lng/step);
+    const cur = cell.get(k);
+    if(!cur || p.mllw < cur.mllw) cell.set(k, p);
+  }
+  const pts = [...cell.values()];
+  return { pts, dropped: list.length - pts.length };
+}
+
+function drawPoints(){
+  if(!ptLayer) return;
+  ptLayer.clearLayers();
+  const reduced = points.filter(p => p.mllw != null);
+  const el = document.getElementById('mapCount');
+  if(!showPts){ el.textContent = points.length + ' soundings hidden'; return; }
+  if(!reduced.length){
+    el.textContent = points.length ? points.length + ' soundings, none reduced yet' : 'no soundings yet';
+    return;
+  }
+  const z = map.getZoom();
+  const { pts, dropped } = decimate(reduced, z);
+  const r = z >= 16 ? 6 : (z >= 14 ? 5 : 4);
+  /* The ring has to scale with the dot. At r=4 a 2px ring is half the mark
+     and the depth colour — the whole encoding — disappears under the white.
+     Thin it at the small sizes; the draft ring stays a step heavier than
+     the plain one at every size, because that is what makes it read as a
+     warning rather than as a slightly different dot. */
+  const w = r >= 6 ? 2 : (r >= 5 ? 1.6 : 1.2);
+  for(const p of pts){
+    const shallow = p.mllw < draftFt;
+    L.circleMarker([p.lat, p.lng], {
+      radius:r, fillColor:binFor(p.mllw).css, fillOpacity:1,
+      /* A white ring is what separates a mark from photo imagery — WTF
+         measured this: colour alone against water can run under 2:1. The
+         red ring is the draft warning riding on top of it. */
+      color: shallow ? DRAFT_RED : '#ffffff', weight: shallow ? w + 1 : w, opacity:1
+    }).bindPopup(popupFor(p)).addTo(ptLayer);
+  }
+  /* Say what is DRAWN, not what exists. "5,369 shown (5,107 stacked)" is a
+     sentence that argues with itself. */
+  el.innerHTML = dropped
+    ? pts.length.toLocaleString() + ' of ' + reduced.length.toLocaleString()
+      + ' <span class="est">&mdash; zoom in for the rest</span>'
+    : reduced.length.toLocaleString() + ' soundings';
+}
+
+function popupFor(p){
+  const d = new Date(p.t);
+  const m = METHODS.find(x => x.id === p.method);
+  const sv = depthAtPoint(p.lat, p.lng);
+  let s = '<b>' + p.mllw.toFixed(1) + ' ft at MLLW</b><br>'
+        + (p.name ? esc(p.name) + '<br>' : '')
+        + fmtDDM(p.lat,true) + ' ' + fmtDDM(p.lng,false) + '<br>'
+        + d.toLocaleDateString([], {month:'numeric', day:'numeric', year:'2-digit'}) + ' '
+        + d.toLocaleTimeString([], {hour:'numeric', minute:'2-digit'}) + '<br>'
+        + 'read ' + p.ft.toFixed(1) + ' ft'
+        + (p.off ? ' + ' + p.off.toFixed(1) + ' offset' : '')
+        + (p.tide != null ? ' &minus; ' + p.tide.toFixed(2) + ' ft of tide' : '')
+        + '<br><span style="opacity:.7">' + (m ? m.label : p.method) + '</span>';
+  if(sv && sv.nearM <= 600){
+    const diff = p.mllw - sv.ft;
+    s += '<br>survey says ' + sv.ft.toFixed(1) + ' ft &mdash; you are <b>'
+       + (diff >= 0 ? '+' : '') + diff.toFixed(1) + '</b> off it';
+    if(sv.nearM > 200) s += '<br><span style="opacity:.7">contours ' + Math.round(sv.nearM)
+       + ' m away &mdash; the survey is filling in there, not measuring</span>';
+  } else if(sv){
+    s += '<br><span style="opacity:.7">nearest contour ' + Math.round(sv.nearM)
+       + ' m away &mdash; the survey has nothing to say here</span>';
+  }
+  return s;
+}
+
+/* The surveyed contours, drawn thin and grey UNDER the soundings so a
+   disagreement is visible rather than argued about. Loaded only when
+   asked for: it is a megabyte of lines. */
+async function drawSurvey(){
+  surveyLayer.clearLayers();
+  const b = map.getBounds();
+  const keys = new Set();
+  for(const [k,w,s,e,n] of DEPTH_BLOCKS){
+    if(b.getWest() <= e && b.getEast() >= w && b.getSouth() <= n && b.getNorth() >= s) keys.add(k);
+  }
+  for(const k of keys) await depthLoadBlock(k);
+  for(const k of keys){
+    const blk = depthBlocks.get(k);
+    if(!blk || blk === 'loading') continue;
+    for(const ln of blk.lines){
+      if(ln.bb[2] < b.getWest() || ln.bb[0] > b.getEast() || ln.bb[3] < b.getSouth() || ln.bb[1] > b.getNorth()) continue;
+      const latlngs = [];
+      for(let i = 0; i < ln.pts.length; i += 2) latlngs.push([ln.pts[i+1], ln.pts[i]]);
+      L.polyline(latlngs, { color:'#0E1F2E', weight:1, opacity:.5 })
+       .bindTooltip(ln.lv + ' ft (survey)').addTo(surveyLayer);
+    }
+  }
+}
+
+/* =====================================================================
+   SMALL HELPERS
+   ===================================================================== */
+function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function fmtDDM(v, isLat){
+  const hemi = isLat ? (v >= 0 ? 'N' : 'S') : (v >= 0 ? 'E' : 'W');
+  const a = Math.abs(v), d = Math.floor(a), m = (a - d)*60;
+  return d + '°' + m.toFixed(3).padStart(6,'0') + "'" + hemi;
+}
+/* Degrees-decimal-minutes as a plotter shows it, in any of the shapes a
+   person actually types: "29 02.580", "29°02.580'", "2902.580", "29.0430".
+   A bare decimal degree is accepted too and told apart by size — minutes
+   never reach 60, so a second field over 60 can only be decimal degrees. */
+function parseDDM(s, isLat){
+  if(!s) return NaN;
+  const cleaned = String(s).trim().replace(/[NSEWnsew]/g,'').replace(/[^\d.\-\s]/g,' ').replace(/\s+/g,' ').trim();
+  if(!cleaned) return NaN;
+  const parts = cleaned.split(' ').map(Number);
+  if(parts.some(isNaN)) return NaN;
+  let v;
+  if(parts.length === 1){
+    v = parts[0];
+    /* "2902.580" — no space, degrees and minutes run together. Minutes are
+       always the last two whole digits before the point. */
+    if(Math.abs(v) > (isLat ? 90 : 180)){
+      const str = Math.abs(v).toFixed(3);
+      const dot = str.indexOf('.');
+      const deg = parseFloat(str.slice(0, dot-2)), min = parseFloat(str.slice(dot-2));
+      v = deg + min/60;
+    }
+  } else if(parts.length === 2){
+    v = Math.abs(parts[0]) + parts[1]/60;
+  } else {
+    v = Math.abs(parts[0]) + parts[1]/60 + parts[2]/3600;
+  }
+  if(!isFinite(v)) return NaN;
+  /* This coast only: latitude north, longitude west. Typing the minus sign
+     is the commonest slip there is, so the sign is imposed rather than
+     trusted — a positive longitude here would land the spot in China. */
+  return isLat ? Math.abs(v) : -Math.abs(v);
+}
+const median = a => {
+  const s = a.slice().sort((x,y) => x-y), n = s.length;
+  return n ? (n%2 ? s[(n-1)/2] : (s[n/2-1]+s[n/2])/2) : null;
+};
+function note(id, cls, html){
+  const el = document.getElementById(id);
+  if(el) el.innerHTML = html ? '<div class="' + cls + '">' + html + '</div>' : '';
+}
+function nearestName(lat,lng){
+  let best = null, bd = Infinity;
+  for(const l of LOCATIONS){
+    if(!isFinite(l.lat)) continue;
+    const d = distNm({lat,lng}, {lat:l.lat, lng:l.lng});
+    if(d < bd){ bd = d; best = l.name; }
+  }
+  return best ? { name:best, yd:bd*2025.37 } : null;
+}
+
+/* =====================================================================
+   LOGGING — GPS, the live reading, and the tap
+   ===================================================================== */
+let fix = null, watchId = null;
+
+function startGps(){
+  if(watchId !== null || !navigator.geolocation) return;
+  watchId = navigator.geolocation.watchPosition(
+    pos => {
+      fix = { lat:pos.coords.latitude, lng:pos.coords.longitude, acc:pos.coords.accuracy, at:Date.now() };
+      const bk = blockFor(fix.lat, fix.lng);
+      if(bk && !depthBlocks.has(bk)) depthLoadBlock(bk).then(renderRead);
+      renderGps(); renderRead();
+    },
+    () => { renderGps(); },
+    { enableHighAccuracy:true, maximumAge:2000, timeout:20000 });
+}
+function renderGps(){
+  const el = document.getElementById('gpsLine');
+  if(!fix){
+    el.className = 'gps stale';
+    el.textContent = 'GPS: no fix yet — open this outdoors and give it a moment. You can still type a position below.';
+    return;
+  }
+  const age = (Date.now() - fix.at)/1000;
+  el.className = 'gps' + (age > 30 || fix.acc > 30 ? ' stale' : '');
+  const nc = nearestName(fix.lat, fix.lng);
+  el.innerHTML = '<span class="pos">' + fmtDDM(fix.lat,true) + ' ' + fmtDDM(fix.lng,false) + '</span>'
+    + '&plusmn;' + Math.round(fix.acc) + ' m &middot; ' + (age < 5 ? 'live' : Math.round(age) + ' s old')
+    + (nc ? ' &middot; ' + esc(nc.name) + ' ' + (nc.yd < 1760 ? Math.round(nc.yd) + ' yd' : (nc.yd/1760).toFixed(1) + ' mi') : '');
+}
+
+const curMethod = () => METHODS.find(m => m.id === method) || METHODS[0];
+
+function renderMethods(){
+  const row = document.getElementById('methodRow');
+  row.innerHTML = METHODS.map(m =>
+    '<button class="mbtn' + (m.id === method ? ' on' : '') + '" data-m="' + m.id + '">' + m.label
+    + '<span class="off0">' + (m.fixed ? 'offset 0' : 'offset yours') + '</span></button>').join('');
+  row.querySelectorAll('.mbtn').forEach(b => b.addEventListener('click', () => {
+    method = b.dataset.m; lsSet(LS.method, method);
+    renderMethods(); applyMethodToForm(); renderRead(); renderManualRead();
+  }));
+  document.getElementById('methodNote').innerHTML = '<b>' + curMethod().label + '.</b> ' + curMethod().note;
+}
+/* A method that reads from the surface has no offset to enter, so the field
+   is set to 0 and locked rather than left open — an offset typed into a
+   tape-measure reading is a foot of error nobody would ever look for. */
+function applyMethodToForm(){
+  const m = curMethod(), el = document.getElementById('fOffset'), lbl = document.getElementById('fOffsetLbl');
+  if(m.fixed){
+    el.value = '0'; el.disabled = true;
+    lbl.innerHTML = 'Offset <span class="est">— reads from the surface</span>';
+  } else {
+    el.disabled = false;
+    lbl.textContent = 'Transducer below waterline (ft)';
+    if(el.value === '' || el.value === '0'){
+      const saved = lsGet(LS.off) || lsGet(LS.tbOffset);
+      el.value = (saved != null && saved !== '') ? saved : '0';
+    }
+  }
+}
+function formOffset(){
+  const m = curMethod();
+  if(m.fixed) return 0;
+  const v = parseFloat(document.getElementById('fOffset').value);
+  return isFinite(v) ? v : 0;
+}
+
+function readoutHTML(lat, lng, when, depth, off){
+  if(!isFinite(depth)) return '<span class="est">Enter a depth reading.</span>';
+  if(!preds.length) return '<span class="est">No tide predictions loaded yet — a reading logged now still '
+    + 'keeps its position and time, and is reduced as soon as they arrive.</span>';
+  const tp = tideAtPos(lat, lng, when);
+  if(!tp) return '<span class="est">That time is outside the predictions loaded — it will be reduced on import.</span>';
+  const toWater = depth + off, mllw = toWater - tp.ft, m = tp.model;
+  const lagTxt = m.from ? esc(m.from) + "'s lag" : 'lag H +' + Math.round(m.hi) + 'm / L +' + Math.round(m.lo) + 'm, est.';
+  let s = toWater.toFixed(1) + ' ft to the waterline &minus; ' + tp.ft.toFixed(2) + ' ft of tide = <b>'
+        + mllw.toFixed(1) + ' ft at MLLW</b><br><span class="est">' + lagTxt
+        + (m.measured ? '' : ' &middot; height scaling est.') + '</span>';
+  const sv = depthAtPoint(lat, lng);
+  if(sv && sv.nearM <= 600){
+    const diff = mllw - sv.ft;
+    s += '<br>survey here says ' + sv.ft.toFixed(1) + ' ft, off contours ' + Math.round(sv.nearM)
+       + ' m away &mdash; you are <b>' + (diff >= 0 ? '+' : '') + diff.toFixed(1) + ' ft</b> off it';
+    s += sv.nearM > 200
+      ? '<br><span class="est">that far from a contour the survey is filling in, not measuring — this gap is not evidence either way</span>'
+      : (Math.abs(diff) >= 3 ? ' &nbsp;<span class="est">worth a second pass</span>' : '');
+  } else if(sv){
+    s += '<br><span class="est">nearest surveyed contour is ' + Math.round(sv.nearM)
+       + ' m away &mdash; the survey has nothing to say here, which is the best reason to sound it</span>';
+  }
+  return s;
+}
+function renderRead(){
+  const el = document.getElementById('readOut'), btn = document.getElementById('btnLog');
+  const depth = parseFloat(document.getElementById('fDepth').value);
+  btn.disabled = !(fix && isFinite(depth) && depth >= 0);
+  if(!fix){ el.innerHTML = '<span class="est">Waiting for a position.</span>'; return; }
+  el.innerHTML = readoutHTML(fix.lat, fix.lng, new Date(), depth, formOffset());
+}
+
+function addPoint(p){
+  points.push(p);
+  savePoints();
+  reduceAll([p]).then(() => { drawPoints(); renderTally(); });
+  drawPoints(); renderTally();
+}
+
+function logHere(){
+  const depth = parseFloat(document.getElementById('fDepth').value);
+  if(!fix || !isFinite(depth)) return;
+  let name = document.getElementById('fName').value.trim();
+  if(!name){
+    const nc = nearestName(fix.lat, fix.lng);
+    name = nc ? (nc.yd < 200 ? nc.name : nc.name + ' area') : 'Unnamed spot';
+    document.getElementById('fName').value = name;
+  }
+  const off = formOffset();
+  if(!curMethod().fixed) lsSet(LS.off, String(off));
+  addPoint({ t:Date.now(), lat:fix.lat, lng:fix.lng, ft:depth, off, method, name, pass:'log', mllw:null, tide:null });
+  document.getElementById('fDepth').value = '';
+  renderRead();
+}
+
+/* ---- typed position ---- */
+function manualFields(){
+  const lat = parseDDM(document.getElementById('mLat').value, true);
+  const lng = parseDDM(document.getElementById('mLng').value, false);
+  const whenRaw = document.getElementById('mWhen').value;
+  const when = whenRaw ? new Date(whenRaw) : new Date();
+  const depth = parseFloat(document.getElementById('mDepth').value);
+  return { lat, lng, when, depth };
+}
+function renderManualRead(){
+  const { lat, lng, when, depth } = manualFields();
+  const el = document.getElementById('manualRead'), btn = document.getElementById('btnManualLog');
+  const ok = isFinite(lat) && isFinite(lng) && isFinite(depth) && when instanceof Date && !isNaN(when);
+  btn.disabled = !ok;
+  if(!isFinite(lat) || !isFinite(lng)){
+    el.innerHTML = '<span class="est">Enter a position. Degrees and minutes: <b>29 02.580</b> and <b>80 57.589</b>.</span>';
+    return;
+  }
+  /* Show the parsed position back, always. A typo in a coordinate is
+     invisible in the box it was typed into and obvious next to a place name. */
+  const nc = nearestName(lat,lng);
+  el.innerHTML = '<b>' + fmtDDM(lat,true) + ' ' + fmtDDM(lng,false) + '</b>'
+    + (nc ? ' <span class="est">&middot; ' + esc(nc.name) + ' '
+        + (nc.yd < 1760 ? Math.round(nc.yd) + ' yd' : (nc.yd/1760).toFixed(1) + ' mi') + ' away</span>' : '')
+    + '<br>' + readoutHTML(lat, lng, when, depth, formOffset());
+}
+function logManual(){
+  const { lat, lng, when, depth } = manualFields();
+  if(!isFinite(lat) || !isFinite(lng) || !isFinite(depth)) return;
+  const name = document.getElementById('fName').value.trim()
+    || (nearestName(lat,lng) || {name:'Unnamed spot'}).name;
+  addPoint({ t:+when, lat, lng, ft:depth, off:formOffset(), method, name, pass:'typed', mllw:null, tide:null });
+  document.getElementById('mDepth').value = '';
+  renderManualRead();
+}
+
+/* =====================================================================
+   IMPORT — GPX off the plotter card, or a CSV from anything
+   ===================================================================== */
+const M_TO_FT = 3.280839895;
+
+/* Garmin and Humminbird extend GPX with a per-point depth; plain GPX has
+   none. The tag has moved namespace across firmware generations, so this
+   matches any element whose LOCAL name contains "depth" at any nesting
+   rather than a fixed path. */
+function localName(node){
+  return (node.localName || node.nodeName || '').split(':').pop().toLowerCase();
+}
+function findDepth(node){
+  const stack = [...node.children];
+  while(stack.length){
+    const el = stack.pop();
+    if(localName(el).includes('depth')){
+      const v = parseFloat(el.textContent);
+      if(isFinite(v)) return v;
+    }
+    for(const c of el.children) stack.push(c);
+  }
+  return null;
+}
+function parseGPX(text){
+  const doc = new DOMParser().parseFromString(text, 'application/xml');
+  if(doc.querySelector('parsererror')) throw new Error('That file is not readable XML.');
+  const tracks = [];
+  for(const trk of doc.getElementsByTagName('trk')){
+    const nameEl = trk.getElementsByTagName('name')[0];
+    const name = nameEl ? nameEl.textContent.trim() : 'Track';
+    const pts = [];
+    for(const tp of trk.getElementsByTagName('trkpt')){
+      const lat = parseFloat(tp.getAttribute('lat')), lng = parseFloat(tp.getAttribute('lon'));
+      if(!isFinite(lat) || !isFinite(lng)) continue;
+      const tEl = tp.getElementsByTagName('time')[0];
+      const t = tEl ? Date.parse(tEl.textContent) : NaN;
+      const d = findDepth(tp);
+      pts.push({ lat, lng, t, d });
+    }
+    tracks.push({ name, pts });
+  }
+  return tracks;
+}
+
+/* THE UNITS TRAP, decided once and stated on every import.
+
+   The 74sv displays feet and writes METRES — the gpxx/gpxtpx schemas
+   define depth in metres and the unit converts on export. This was settled
+   on real water, not assumed: read as metres the ICW at Dunlawton comes
+   out 15.7-21.8 ft against a ~12 ft charted channel and the Ponce scour
+   hole 69.8 ft; read as feet those become 4.8-6.6 ft and 21 ft, which
+   would have had a boat aground. So the file is metres unless the numbers
+   are too big to be — a raw value over 40 in this water can only be feet,
+   because 40 m is 131 ft and there is no such water inside the inlet. */
+function depthUnitGuess(raws){
+  const big = raws.filter(v => v > 40).length;
+  return (big > raws.length*0.02) ? 'ft' : 'm';
+}
+
+async function importGPX(text, filename){
+  const tracks = parseGPX(text);
+  const withDepth = tracks.filter(t => t.pts.some(p => p.d != null));
+  if(!withDepth.length){
+    const n = tracks.reduce((s,t) => s + t.pts.length, 0);
+    return { html:'<div class="warnbox"><b>No depths in that file.</b> ' + n.toLocaleString()
+      + ' trackpoints, none carrying a depth. On the ECHOMAP, <b>Save Active Track</b> writes geometry only — '
+      + 'the depths and the timestamps live in <b>ACTIVE LOG</b>. Export that one instead.</div>', added:0 };
+  }
+  const raws = [];
+  for(const t of withDepth) for(const p of t.pts) if(p.d != null) raws.push(p.d);
+  const unit = depthUnitGuess(raws);
+  const k = unit === 'm' ? M_TO_FT : 1;
+
+  const passId = 'p' + Date.now().toString(36);
+  const fresh = [];
+  let noTime = 0, dup = 0;
+  /* Re-importing the same card is normal — the ACTIVE LOG overlaps the last
+     export. A point is the same point if it is the same second at the same
+     six decimal places, which is finer than any GPS is. */
+  const seen = new Set(points.map(p => Math.round(p.t/1000) + '|' + p.lat.toFixed(5) + '|' + p.lng.toFixed(5)));
+  for(const t of withDepth){
+    for(const p of t.pts){
+      if(p.d == null) continue;
+      if(!isFinite(p.t)){ noTime++; continue; }
+      const key = Math.round(p.t/1000) + '|' + p.lat.toFixed(5) + '|' + p.lng.toFixed(5);
+      if(seen.has(key)){ dup++; continue; }
+      seen.add(key);
+      fresh.push({ t:p.t, lat:p.lat, lng:p.lng, ft:p.d*k, off:0, method:'sounder',
+                   name:'', pass:passId, mllw:null, tide:null });
+    }
+  }
+  if(!fresh.length){
+    return { html:'<div class="okbox">Nothing new in that file — every sounding in it is already here'
+      + (dup ? ' (' + dup.toLocaleString() + ' repeats)' : '') + '.</div>', added:0 };
+  }
+  points = points.concat(fresh);
+  const span = [Math.min(...fresh.map(p => p.t)), Math.max(...fresh.map(p => p.t))];
+  passes.push({ id:passId, label:filename, when:Date.now(), n:fresh.length, src:'gpx',
+                from:span[0], to:span[1], unit });
+  savePoints();
+
+  note('importOut','okbox','Reducing ' + fresh.length.toLocaleString() + ' soundings against the tide at each minute&hellip;');
+  const n = await reduceAll(fresh);
+  const days = new Set(fresh.map(p => new Date(p.t).toDateString())).size;
+  let html = '<div class="okbox"><b>' + fresh.length.toLocaleString() + ' soundings added</b> from '
+    + esc(filename) + ' — ' + days + ' day' + (days === 1 ? '' : 's') + ' on the water, '
+    + new Date(span[0]).toLocaleDateString() + ' to ' + new Date(span[1]).toLocaleDateString() + '.<br>'
+    + n.toLocaleString() + ' reduced to MLLW.'
+    + (dup ? '<br>' + dup.toLocaleString() + ' were already here and were skipped.' : '')
+    + (noTime ? '<br><b>' + noTime.toLocaleString() + ' had no timestamp and were dropped</b> — a depth with '
+        + 'no minute cannot be reduced, so it is not a sounding.' : '')
+    + '<br>Depths read as <b>' + (unit === 'm' ? 'metres and converted to feet' : 'feet, already') + '</b>.'
+    + '</div>';
+  if(n < fresh.length) html += '<div class="warnbox">' + (fresh.length-n).toLocaleString()
+    + ' could not be reduced — NOAA predictions for those dates would not load. They are kept; '
+    + 'run <b>Re-reduce everything</b> when you are back on signal.</div>';
+  return { html, added:fresh.length };
+}
+
+/* CSV, loose about column names on purpose: this has to swallow the app's
+   own export, the Python tool's output, and whatever a different plotter
+   or a friend's spreadsheet calls the same four things. */
+/* NOTE what is NOT in the depth list: depth_ft_mllw. That column is a
+   sounding that has ALREADY been reduced — reading it as a raw reading
+   would subtract the tide from it a second time, and the result would look
+   perfectly plausible and be a foot or two shallow. What this wants is the
+   reading to the waterline, whatever the file calls it. */
+const CSV_ALIASES = {
+  lat:['lat','latitude','lat_dd','y'],
+  lng:['lng','lon','long','longitude','lng_dd','x'],
+  ft:['depth_ft','depth','reading_ft','reading','sounder_ft','depth_to_waterline_ft',
+      'sounder_ft_to_waterline'],
+  t:['time_iso','time','timestamp','datetime','date_time','utc','when','time_local'],
+  name:['name','spot','spot_name','label','track'],
+  off:['offset_ft','offset','transducer_ft']
+};
+function csvSplit(line){
+  const out = []; let cur = '', q = false;
+  for(let i = 0; i < line.length; i++){
+    const c = line[i];
+    if(q){
+      if(c === '"' && line[i+1] === '"'){ cur += '"'; i++; }
+      else if(c === '"') q = false;
+      else cur += c;
+    } else if(c === '"') q = true;
+    else if(c === ','){ out.push(cur); cur = ''; }
+    else cur += c;
+  }
+  out.push(cur);
+  return out;
+}
+async function importCSV(text, filename){
+  const lines = text.split(/\r?\n/).filter(l => l.trim());
+  if(lines.length < 2) return { html:'<div class="warnbox">That file has no rows.</div>', added:0 };
+  const head = csvSplit(lines[0]).map(h => h.trim().toLowerCase());
+  const col = {};
+  for(const [k, names] of Object.entries(CSV_ALIASES)){
+    col[k] = head.findIndex(h => names.includes(h));
+  }
+  if(col.lat < 0 || col.lng < 0 || col.ft < 0){
+    return { html:'<div class="warnbox"><b>Could not find the columns.</b> That file needs a latitude, a '
+      + 'longitude and a depth, under any of the usual names. It has: ' + esc(head.join(', ')) + '</div>', added:0 };
+  }
+  const passId = 'p' + Date.now().toString(36);
+  const fresh = []; let bad = 0, localTime = 0;
+  for(let i = 1; i < lines.length; i++){
+    const c = csvSplit(lines[i]);
+    const lat = parseFloat(c[col.lat]), lng = parseFloat(c[col.lng]), ft = parseFloat(c[col.ft]);
+    if(!isFinite(lat) || !isFinite(lng) || !isFinite(ft)){ bad++; continue; }
+    let t = NaN;
+    if(col.t >= 0 && c[col.t]){
+      const raw = c[col.t].trim();
+      t = Date.parse(raw);
+      /* A bare "2026-04-01 09:12:00" carries no zone. It is read as LOCAL and
+         SAID SO rather than silently assumed: four hours wrong here is the
+         whole 2.2 ft swing. */
+      if(!/[zZ]|[+\-]\d\d:?\d\d$/.test(raw)) localTime++;
+    }
+    if(!isFinite(t)){ bad++; continue; }
+    fresh.push({ t, lat, lng, ft, off: col.off >= 0 ? (parseFloat(c[col.off]) || 0) : 0,
+                 method:'sounder', name: col.name >= 0 ? (c[col.name] || '').replace(/^"|"$/g,'') : '',
+                 pass:passId, mllw:null, tide:null });
+  }
+  if(!fresh.length) return { html:'<div class="warnbox">No usable rows — ' + bad + ' were missing a position, a depth or a time.</div>', added:0 };
+  points = points.concat(fresh);
+  passes.push({ id:passId, label:filename, when:Date.now(), n:fresh.length, src:'csv' });
+  savePoints();
+  const n = await reduceAll(fresh);
+  return { html:'<div class="okbox"><b>' + fresh.length.toLocaleString() + ' rows added</b> from ' + esc(filename)
+    + '. ' + n.toLocaleString() + ' reduced to MLLW.'
+    + (bad ? '<br>' + bad + ' rows skipped (no position, depth or time).' : '')
+    + (localTime ? '<br><b>' + localTime.toLocaleString() + ' timestamps carried no time zone</b> and were read as '
+        + 'local Eastern time. If they were UTC, every one of those is reduced against the wrong tide.' : '')
+    + '</div>', added:fresh.length };
+}
+
+async function handleFiles(files){
+  for(const f of files){
+    note('importOut','okbox','Reading ' + esc(f.name) + '&hellip;');
+    try{
+      const text = await f.text();
+      const isGpx = /\.gpx$/i.test(f.name) || text.slice(0,2000).includes('<gpx');
+      const res = isGpx ? await importGPX(text, f.name) : await importCSV(text, f.name);
+      document.getElementById('importOut').innerHTML = res.html;
+    }catch(e){
+      note('importOut','warnbox','<b>' + esc(f.name) + ' would not open.</b> ' + esc(e.message));
+    }
+  }
+  drawPoints(); renderTally(); renderPasses();
+  if(points.some(p => p.mllw != null)) fitToPoints();
+}
+function fitToPoints(){
+  const red = points.filter(p => p.mllw != null);
+  if(!red.length) return;
+  map.fitBounds(L.latLngBounds(red.map(p => [p.lat, p.lng])).pad(0.15));
+}
+
+function renderPasses(){
+  const el = document.getElementById('passList');
+  if(!passes.length){ el.innerHTML = ''; return; }
+  el.innerHTML = '<div class="tally">' + passes.map(p => {
+    const n = points.filter(x => x.pass === p.id).length;
+    return '<div class="passrow"><span>' + esc(p.label) + ' <span class="n">&times;' + n.toLocaleString() + '</span></span>'
+      + '<span><button class="btn" data-drop="' + p.id + '">Remove</button></span></div>';
+  }).join('') + '</div>';
+  el.querySelectorAll('[data-drop]').forEach(b => b.addEventListener('click', () => {
+    const id = b.dataset.drop;
+    const n = points.filter(x => x.pass === id).length;
+    if(!confirm('Remove ' + n.toLocaleString() + ' soundings from this import?')) return;
+    points = points.filter(x => x.pass !== id);
+    passes = passes.filter(x => x.id !== id);
+    savePoints(); drawPoints(); renderTally(); renderPasses();
+  }));
+}
+
+/* =====================================================================
+   SPOTS — a name, a median and an honest spread
+   ===================================================================== */
+function groupsByName(){
+  const g = new Map();
+  for(const p of points){
+    if(p.mllw == null) continue;
+    const k = (p.name || '').trim();
+    if(!k) continue;                       // imported track points carry no name
+    if(!g.has(k)) g.set(k, []);
+    g.get(k).push(p);
+  }
+  return g;
+}
+function renderTally(){
+  const el = document.getElementById('spotTally');
+  const g = groupsByName();
+  if(!g.size){
+    el.innerHTML = '<p class="est">No named spots yet. Every sounding you log by hand takes a name; '
+      + 'imported track points do not, because a track is a line, not a spot.</p>';
+    return;
+  }
+  let rows = '<div class="tally"><div class="t-row head"><span>Spot</span><span>median at MLLW</span></div>';
+  let wide = false;
+  for(const [name, pts] of [...g.entries()].sort((a,b) => a[0].localeCompare(b[0]))){
+    const v = pts.map(p => p.mllw);
+    const med = median(v), spread = Math.max(...v) - Math.min(...v);
+    if(spread > 3 && v.length > 1) wide = true;
+    rows += '<div class="t-row"><span class="t-name" data-goto="' + esc(name) + '">' + esc(name)
+      + ' <span class="n">&times;' + v.length + '</span></span><span><b>' + med.toFixed(1) + ' ft</b>'
+      + (v.length > 1 ? ' <span class="n">&plusmn;' + (spread/2).toFixed(1) + '</span>' : '')
+      + ' <button class="btn" data-push="' + esc(name) + '">&rarr; board</button></span></div>';
+  }
+  rows += '</div>';
+  if(wide) rows += '<div class="warnbox"><b>One of these spreads is over 3 ft.</b> That is not one depth — '
+    + 'it is a slope. Split it into two spots or throw out the pass.</div>';
+  el.innerHTML = rows;
+  el.querySelectorAll('[data-goto]').forEach(b => b.addEventListener('click', () => {
+    const pts = g.get(b.dataset.goto);
+    if(pts && pts.length){
+      map.setView([pts[0].lat, pts[0].lng], 16);
+      document.getElementById('map').scrollIntoView({behavior:'smooth', block:'center'});
+    }
+  }));
+  el.querySelectorAll('[data-push]').forEach(b => b.addEventListener('click', () => pushToBoard(b.dataset.push, g)));
+}
+
+/* The one thing this app writes back to the tide board. A median becomes
+   that card's soundedFt, which is the number the board prints as the
+   headline with the survey demoted underneath it. Matching is by POSITION,
+   not by name — the board's card names and the names typed here are not
+   the same vocabulary, and a name match would silently write the wrong
+   card. */
+function pushToBoard(name, g){
+  const pts = g.get(name);
+  if(!pts || !pts.length) return;
+  const med = median(pts.map(p => p.mllw));
+  let best = null, bd = Infinity;
+  for(const l of LOCATIONS){
+    if(!isFinite(l.lat)) continue;
+    const d = distNm({lat:pts[0].lat, lng:pts[0].lng}, {lat:l.lat, lng:l.lng})*2025.37;
+    if(d < bd){ bd = d; best = l; }
+  }
+  if(!best || bd > 300){
+    note('dataOut','warnbox','<b>No card on the tide board is near ' + esc(name) + '.</b> '
+      + 'The nearest is ' + (best ? esc(best.name) + ' ' + Math.round(bd) + ' yd away' : 'none at all')
+      + '. Add a spot there on the board first, then push this again.');
+    document.getElementById('dataBox').open = true;
+    return;
+  }
+  if(!confirm('Set "' + best.name + '" on the tide board to ' + med.toFixed(1) + ' ft at MLLW?\n\n'
+    + 'That card is ' + Math.round(bd) + ' yd from these ' + pts.length + ' soundings.')) return;
+  const sounded = lsJSON(LS.tbSounded, {}) || {};
+  sounded[best.key] = +med.toFixed(1);
+  const ok = lsSet(LS.tbSounded, JSON.stringify(sounded));
+  note('dataOut', ok ? 'okbox' : 'warnbox', ok
+    ? '<b>' + esc(best.name) + ' is now ' + med.toFixed(1) + ' ft at MLLW on the tide board.</b> '
+      + 'It takes effect the next time the board is opened.'
+    : 'That could not be written — the two apps may not be sharing storage from here.');
+  document.getElementById('dataBox').open = true;
+}
+
+/* =====================================================================
+   EXPORT
+   ===================================================================== */
+function toCSV(){
+  const head = 'name,time_iso,lat,lng,method,reading_ft,offset_ft,depth_to_waterline_ft,tide_ft_mllw,depth_ft_mllw\n';
+  return head + points.map(p => [
+    JSON.stringify(p.name || ''), new Date(p.t).toISOString(),
+    p.lat.toFixed(6), p.lng.toFixed(6), p.method || '',
+    p.ft.toFixed(2), (p.off || 0).toFixed(2), (p.ft + (p.off||0)).toFixed(2),
+    p.tide == null ? '' : p.tide.toFixed(2),
+    p.mllw == null ? '' : p.mllw.toFixed(2)
+  ].join(',')).join('\n') + '\n';
+}
+function download(name, text, type){
+  const url = URL.createObjectURL(new Blob([text], {type: type || 'text/plain'}));
+  const a = document.createElement('a');
+  a.href = url; a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/* =====================================================================
+   LEGEND & FOOTER
+   ===================================================================== */
+function renderLegend(){
+  document.getElementById('legendRow').innerHTML = BINS.map(b =>
+    '<div class="lg-cell"><div class="lg-sw" style="background:' + b.css + '"></div>'
+    + '<div class="lg-lbl">' + b.label + '</div></div>').join('');
+  document.getElementById('legendNote').innerHTML =
+    'Feet at dead low, so the water is this plus the tide. A <b style="color:' + DRAFT_RED + '">red ring</b> '
+    + 'marks anything under <b>' + draftFt.toFixed(1) + ' ft</b> '
+    + '<button class="btn" id="btnDraft" style="padding:2px 5px">change</button>. Tap any dot for its numbers.';
+  const b = document.getElementById('btnDraft');
+  if(b) b.addEventListener('click', () => {
+    const v = prompt('Warn on soundings shallower than how many feet at MLLW?\n\n'
+      + 'This is a draft line, not a depth: set it to what you want to be told about.', draftFt);
+    const f = parseFloat(v);
+    if(isFinite(f) && f >= 0 && f < 20){ draftFt = f; lsSet(LS.draft, String(f)); renderLegend(); drawPoints(); }
+  });
+}
+function renderFooter(){
+  const red = points.filter(p => p.mllw != null).length;
+  document.getElementById('footNote').innerHTML =
+    '<b>Datum.</b> Every depth here is feet at <b>MLLW</b> — mean lower low water, the zero a chart is '
+    + 'printed to. The water over it is this number plus the tide at the time, which is never negative for '
+    + 'long. A tide height is not a depth and a depth is not a tide height.'
+    + '<br><br><b>The survey is the second opinion, not the first.</b> The contours drawn under these dots '
+    + 'come from NOAA BlueTopo and NCEI CUDEM, and across the tiles covering this water <b>81% of the cells '
+    + 'are interpolated fill rather than measurement</b>. Where they disagree with a sounding you took, the '
+    + 'sounding wins — that is the entire reason this app exists.'
+    + '<br><br><b>None of this is a chart.</b> A depth measured once was true once, on one line, at one '
+    + 'state of tide. This coast shoals and moves. Never run a boat on a number in here without your own '
+    + 'eyes on the water.'
+    + '<br><br><span style="font-family:var(--mono);font-size:10px">Build ' + BUILD_NUM + ' · ' + BUILD_STAMP
+    + ' · ' + points.length.toLocaleString() + ' soundings, ' + red.toLocaleString() + ' reduced'
+    + (sharedOK ? ' · reading the tide board’s calibrations' : ' · built-in lags only')
+    + (stationUsed ? ' · NOAA ' + stationUsed.id : '') + '</span>';
+}
+
+/* =====================================================================
+   BOOT
+   ===================================================================== */
+async function boot(){
+  loadModel();
+  loadPoints();
+  const moved = migrateFromBoard();
+  initMap();
+  renderLegend();
+  renderMethods();
+  applyMethodToForm();
+  renderGps();
+  renderRead();
+  renderManualRead();
+  renderTally();
+  renderPasses();
+  drawPoints();
+  renderFooter();
+  if(moved) note('importOut','okbox', '<b>' + moved + ' soundings brought over from the tide board.</b> '
+    + 'Logging lives here now; the board keeps the tides.');
+
+  /* Predictions for the here-and-now, so a reading logged on the water
+     reduces in front of you rather than later. */
+  try{
+    const b = new Date(); b.setDate(b.getDate()-2);
+    const e = new Date(); e.setDate(e.getDate()+8);
+    preds = await fetchRange(b, e);
+  }catch(err){
+    /* No signal is the normal case on this water. A reading logged now
+       keeps its position and its minute and is reduced on the way home —
+       which is why the raw reading is what gets stored. */
+    preds = [];
+  }
+  renderRead(); renderManualRead(); renderFooter();
+  const n = await reduceAll();
+  if(n){ drawPoints(); renderTally(); renderFooter(); }
+  if(points.some(p => p.mllw != null)) fitToPoints();
+  startGps();
+
+  /* Registered last, so a failure here can never keep the app from opening.
+     It is what makes the app work with the signal off — which is where it
+     is used. */
+  if('serviceWorker' in navigator){
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
+}
+
+/* ---- wiring ---- */
+document.getElementById('btnLog').addEventListener('click', logHere);
+document.getElementById('btnManualLog').addEventListener('click', logManual);
+document.getElementById('fDepth').addEventListener('input', renderRead);
+document.getElementById('fOffset').addEventListener('input', () => { renderRead(); renderManualRead(); });
+for(const id of ['mLat','mLng','mWhen','mDepth']){
+  document.getElementById(id).addEventListener('input', renderManualRead);
+}
+document.getElementById('btnManual').addEventListener('click', () => {
+  const box = document.getElementById('manualBox');
+  box.open = true;
+  box.scrollIntoView({behavior:'smooth', block:'start'});
+});
+document.getElementById('btnUndo').addEventListener('click', () => {
+  const own = points.map((p,i) => ({p,i})).filter(x => x.p.pass === 'log' || x.p.pass === 'typed');
+  if(!own.length) return;
+  points.splice(own[own.length-1].i, 1);
+  savePoints(); drawPoints(); renderTally(); renderFooter();
+});
+document.getElementById('fileIn').addEventListener('change', e => {
+  if(e.target.files && e.target.files.length) handleFiles([...e.target.files]);
+  e.target.value = '';
+});
+document.getElementById('btnPts').addEventListener('click', e => {
+  showPts = !showPts;
+  e.target.classList.toggle('on', showPts);
+  drawPoints();
+});
+document.getElementById('btnSurvey').addEventListener('click', async e => {
+  showSurvey = !showSurvey;
+  e.target.classList.toggle('on', showSurvey);
+  if(showSurvey){ surveyLayer.addTo(map); e.target.textContent = 'Loading…'; await drawSurvey(); e.target.textContent = 'Survey lines'; }
+  else map.removeLayer(surveyLayer);
+});
+document.getElementById('btnHere').addEventListener('click', () => {
+  if(fix){ map.setView([fix.lat, fix.lng], 16); }
+  else if(navigator.geolocation){
+    navigator.geolocation.getCurrentPosition(p => {
+      fix = { lat:p.coords.latitude, lng:p.coords.longitude, acc:p.coords.accuracy, at:Date.now() };
+      renderGps(); renderRead();
+      map.setView([fix.lat, fix.lng], 16);
+    });
+  }
+});
+document.getElementById('btnCsv').addEventListener('click', async () => {
+  if(!points.length) return;
+  const btn = document.getElementById('btnCsv'), csv = toCSV();
+  try{
+    await navigator.clipboard.writeText(csv);
+    btn.textContent = 'Copied ' + points.length.toLocaleString() + ' rows';
+  }catch(e){
+    /* Clipboard is refused without a secure context or a gesture the browser
+       believes in. A download always works, and on a phone it lands in Files. */
+    download('soundings.csv', csv, 'text/csv');
+    btn.textContent = 'Downloaded';
+  }
+  setTimeout(() => { btn.textContent = 'Copy CSV'; }, 2500);
+});
+document.getElementById('btnJson').addEventListener('click', () => {
+  download('mini-mapper-backup.json',
+    JSON.stringify({ app:'mini-mapper', build:BUILD_NUM, saved:new Date().toISOString(),
+                     passes, points: points.map(ptPack) }), 'application/json');
+});
+document.getElementById('btnReduce').addEventListener('click', async () => {
+  const btn = document.getElementById('btnReduce');
+  btn.disabled = true; btn.textContent = 'Re-reducing…';
+  for(const p of points){ p.mllw = null; p.tide = null; }
+  const n = await reduceAll();
+  btn.disabled = false; btn.textContent = 'Re-reduce everything';
+  note('dataOut', n ? 'okbox' : 'warnbox', n
+    ? '<b>' + n.toLocaleString() + ' soundings re-reduced</b> against the current lags and height models.'
+    : 'Nothing could be reduced — NOAA predictions would not load. Try again on signal.');
+  drawPoints(); renderTally(); renderFooter();
+});
+document.getElementById('btnClear').addEventListener('click', () => {
+  if(!points.length) return;
+  if(!confirm('Delete all ' + points.length.toLocaleString() + ' soundings?\n\nTake the CSV or the backup first — this is the only copy.')) return;
+  points = []; passes = [];
+  savePoints(); drawPoints(); renderTally(); renderPasses(); renderFooter();
+});
+
+boot();
+</script>
+</body>
+</html>
