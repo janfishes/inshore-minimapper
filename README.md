@@ -1,4 +1,4 @@
-# Inshore Mini Mapper
+# Mini Mapper — Inshore
 
 A map of every depth Jan has measured himself, reduced to **MLLW** — the datum a
 chart is printed to — so readings taken at different tides are comparable with

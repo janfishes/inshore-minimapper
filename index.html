@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Inshore Mini Mapper — depths you have actually seen</title>
-<meta name="description" content="Inshore Mini Mapper — a map of every depth you have measured yourself, reduced to MLLW, for the inshore water: Halifax River, Ponce Inlet and Mosquito Lagoon.">
+<title>Mini Mapper — depths you have actually seen</title>
+<meta name="description" content="Mini Mapper — a map of every depth you have measured yourself, reduced to MLLW, for the inshore water: Halifax River, Ponce Inlet and Mosquito Lagoon.">
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#0E1F2E">
 <!-- Same one-switch decision as the tide board: standalone + apple-mobile-web-app-capable
@@ -12,7 +12,7 @@
      Open the site as an ordinary Safari tab from a bookmark when you want the URL. -->
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="Inshore Mapper">
+<meta name="apple-mobile-web-app-title" content="Mini Mapper - Inshore">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 fill=%22%23295890%22/%3E%3Cline x1=%2216%22 y1=%220%22 x2=%2216%22 y2=%2221%22 stroke=%22%23FFFFFF%22 stroke-width=%221.6%22/%3E%3Cpath d=%22M12.6 21 h6.8 l-1.5 7 h-3.8 Z%22 fill=%22%23D15C22%22 stroke=%22%23FFFFFF%22 stroke-width=%221.2%22/%3E%3Cg stroke=%22%23FFFFFF%22 stroke-width=%221.4%22%3E%3Cline x1=%228%22 y1=%225%22 x2=%2213%22 y2=%225%22/%3E%3Cline x1=%228%22 y1=%2210%22 x2=%2213%22 y2=%2210%22/%3E%3Cline x1=%228%22 y1=%2215%22 x2=%2213%22 y2=%2215%22/%3E%3C/g%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -211,7 +211,7 @@
         <line x1="8" y1="5" x2="13" y2="5"/><line x1="8" y1="10" x2="13" y2="10"/><line x1="8" y1="15" x2="13" y2="15"/>
       </g>
     </svg>
-    <span>Inshore <span class="thin">Mini Mapper</span></span>
+    <span>Mini <span class="thin">Mapper</span></span>
   </h1>
   <div class="sub" id="headSub">Every inshore depth you have measured yourself, reduced to MLLW.</div>
 </header>
@@ -384,7 +384,7 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 /* =====================================================================
-   INSHORE MINI MAPPER
+   MINI MAPPER — INSHORE
    A map of the depths Jan has actually measured, reduced to MLLW so that
    readings taken on different tides are comparable with each other and
    with the NOAA survey.
@@ -405,7 +405,7 @@
    same number, which is the whole test of whether any of this works.
    ===================================================================== */
 
-const BUILD_NUM   = 1;
+const BUILD_NUM   = 2;
 const BUILD_STAMP = "2026-08-06";
 
 /* ---------------------------------------------------------------------
